@@ -368,6 +368,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ---------------- 设置 / API 供应商（新设置页的唯一真源） ----------------
+import settings_api as _settings_api  # noqa: E402
+
+_settings_api.configure(DATA_ROOT, CONFIG_PATH, CFG)
+app.include_router(_settings_api.router)
+
 
 def sse(obj: dict) -> str:
     return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
