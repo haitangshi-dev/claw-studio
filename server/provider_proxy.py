@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import httpx
 import settings_api
+import ephemeral
 from secretbox import unprotect
 
 # 这些字段是本地 llama.cpp 的私有参数，转发给云端供应商会造成 400
@@ -42,7 +43,28 @@ def key_for(pid: str, model: str) -> str:
     return f"api:{pid}/{model}"
 
 
+def api_key_of(p: dict) -> str:
+    """取密钥：mem: 前缀是内存态（临时预览用），其余是 DPAPI 密文。"""
+    raw = str(p.get("_apiKey") or "")
+    if raw.startswith("mem:"):
+        return raw[4:]
+    return unprotect(raw)
+
+
 def find_provider(pid: str) -> dict | None:
+    # 临时预览的虚拟供应商：凭据只在内存里，不落盘、不进设置
+    if str(pid) == ephemeral.EPHEMERAL_ID:
+        c = ephemeral.get_creds()
+        if not c.get("apiKey"):
+            return None
+        return {
+            "id": ephemeral.EPHEMERAL_ID,
+            "name": "临时连接（不保存）",
+            "baseUrl": c.get("baseUrl") or "",
+            "model": c.get("model") or "",
+            "_apiKey": "mem:" + c.get("apiKey", ""),
+            "timeout": 120,
+        }
     for p in (settings_api.load_settings().get("providers") or []):
         if str(p.get("id")) == str(pid):
             return p
@@ -78,7 +100,7 @@ async def stream(pid: str, model: str, payload: dict):
     if not p:
         raise LookupError(f"供应商 {pid} 不存在，可能已被删除")
     chat_url, _ = endpoints(p.get("baseUrl") or "")
-    key = unprotect(p.get("_apiKey") or "")
+    key = api_key_of(p)
     headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
     if key:
         headers["Authorization"] = f"Bearer {key}"
@@ -110,7 +132,7 @@ async def probe(pid: str) -> dict:
     if not p:
         return {"ok": False, "error": "供应商不存在"}
     _, models_url = endpoints(p.get("baseUrl") or "")
-    key = unprotect(p.get("_apiKey") or "")
+    key = api_key_of(p)
     headers = {"Authorization": f"Bearer {key}"} if key else {}
     try:
         async with httpx.AsyncClient(timeout=float(p.get("timeout") or 15)) as c:
@@ -132,7 +154,7 @@ async def complete(pid: str, model: str, payload: dict, timeout: float = 180) ->
     if not p:
         raise LookupError(f"供应商 {pid} 不存在")
     chat_url, _ = endpoints(p.get("baseUrl") or "")
-    key = unprotect(p.get("_apiKey") or "")
+    key = api_key_of(p)
     headers = {"Content-Type": "application/json"}
     if key:
         headers["Authorization"] = f"Bearer {key}"

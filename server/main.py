@@ -43,6 +43,25 @@ else:
 ROOT = DATA_ROOT  # 兼容旧引用：数据根
 sys.path.insert(0, str(BUNDLE / "server"))
 
+# 临时预览模式（--ephemeral）：数据根改到系统临时目录，进程退出整目录删除——
+# 记忆库、会话、诊断日志、工具产物、临时生成的技能全在里面，结束即不留痕。
+EPHEMERAL = "--ephemeral" in sys.argv
+if EPHEMERAL:
+    import ephemeral as _eph_mod
+
+    DATA_ROOT = _eph_mod.make_temp_root()
+    ROOT = DATA_ROOT
+    # 技能/插件在临时模式下复制一份进临时目录：
+    # 这样扫描得到的是仓库里那批，同时「新建技能」写在临时目录里，退出即删，
+    # 不会把你试用时生成的技能留在仓库里。
+    for _sub in ("skills", "plugins"):
+        _src = BUNDLE / _sub
+        if _src.exists():
+            try:
+                shutil.copytree(str(_src), str(DATA_ROOT / _sub), dirs_exist_ok=True)
+            except Exception:
+                pass
+
 # windowed（无控制台）打包：必须在任何三方库导入前把 stdout/stderr 指到日志文件——
 # 否则 jieba 等在导入期创建 logging StreamHandler 时绑定到 None，之后每次日志都报
 # "'NoneType' object has no attribute 'write'" 噪声。
@@ -106,7 +125,7 @@ import httpx  # noqa: E402
 from urllib.parse import quote  # noqa: E402
 from fastapi import FastAPI, Request, Response  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse  # noqa: E402
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
@@ -397,6 +416,45 @@ except Exception:
     pass
 
 
+# ---------------- 临时预览：只在内存里的凭据 ----------------
+@app.get("/api/ephemeral")
+def ephemeral_status():
+    """临时连接状态（不回显 Key，只回掩码）。"""
+    import ephemeral as _eph
+
+    return {"ok": True, **_eph.status(), "enabled": EPHEMERAL}
+
+
+@app.post("/api/ephemeral")
+def ephemeral_set(payload: dict):
+    """设置临时凭据。只存内存：不写 config.json、不写 settings.json、不做 DPAPI 加密。"""
+    import ephemeral as _eph
+
+    base = str((payload or {}).get("baseUrl") or "").strip()
+    key = str((payload or {}).get("apiKey") or "").strip()
+    model = str((payload or {}).get("model") or "").strip()
+    if not base or not key:
+        return {"ok": False, "error": "需要 Base URL 和 API Key"}
+    if not EPHEMERAL:
+        return {"ok": False, "error": "当前不是临时预览模式（启动时加 --ephemeral）"}
+    st = _eph.set_creds(base, key, model)
+    try:
+        import diag as _dg
+
+        _dg.info("ephemeral.set", baseUrl=base, model=model, ephemeral=True)
+    except Exception:
+        pass
+    return {"ok": True, **st}
+
+
+@app.delete("/api/ephemeral")
+def ephemeral_clear():
+    import ephemeral as _eph
+
+    _eph.clear_creds()
+    return {"ok": True}
+
+
 @app.get("/api/logs")
 def logs_list(limit: int = 200, level: str = "", q: str = ""):
     """诊断日志：新→旧。level 取 debug/info/warn/error（至少该级别），q 全文包含匹配。"""
@@ -628,6 +686,24 @@ def models():
                 )
     except Exception:
         pass
+    # 临时预览：内存里的凭据也进清单（主界面模型菜单能直接选到）
+    try:
+        import ephemeral as _eph0
+
+        _c = _eph0.get_creds()
+        if _c.get("apiKey") and _c.get("model"):
+            out.append({
+                "key": f"api:{_eph0.EPHEMERAL_ID}/{_c['model']}",
+                "name": f"临时连接（不保存） · {_c['model']}",
+                "arch": "", "ctx_train": 128000, "ctx": 128000,
+                "size_label": "", "source": "ephemeral", "size_mb": None,
+                "has_profile": False, "current": bool(default_key == f"api:{_eph0.EPHEMERAL_ID}/{_c['model']}"),
+                "cloud": True, "provider": "api", "tools": True, "images": False,
+                "credits": "", "free": False,
+            })
+    except Exception:
+        pass
+
     # 设置页里配好的 OpenAI 兼容供应商：每个供应商的模型并进清单，
     # key 形如 api:<pid>/<model>，选中它就直接走那家的接口（不再需要另配一套环境）。
     try:
@@ -2807,6 +2883,34 @@ def index():
     if idx.exists():
         return FileResponse(idx)
     return {"message": "前端尚未构建：cd web && npm run build"}
+
+
+# 设置页 / 预览页 / 演示页是独立 HTML，必须各自有路由——
+# 之前只 serve 了 "/" 和 "/assets"，主界面点设置（iframe 载 /admin.html）直接 404。
+@app.get("/admin.html")
+def admin_page():
+    return _serve_page("admin.html", "设置页")
+
+
+@app.get("/preview.html")
+def preview_page():
+    return _serve_page("preview.html", "临时预览页")
+
+
+@app.get("/demo.html")
+def demo_page():
+    return _serve_page("demo.html", "演示页")
+
+
+def _serve_page(name: str, label: str):
+    f = WEB_DIST / name
+    if f.exists():
+        return FileResponse(f)
+    # 没构建出来时给一句人话，而不是 FastAPI 的 {"detail":"Not Found"}
+    return HTMLResponse(
+        f"<h3>{label}还没构建</h3><p>请在 web 目录执行 <code>npm install && npm run build</code> 后重启。</p>",
+        status_code=503,
+    )
 
 
 def _wait_ready(url: str, timeout_s: float = 25.0) -> bool:
