@@ -230,3 +230,14 @@
 }
 .pv-input textarea:focus { border-color: var(--primary); }
 .pv-input textarea:disabled { opacity: 0.5; }
+
+/* 模型名 + 获取按钮 */
+.pv-model-row { display: flex; gap: 6px; }
+.pv-model-row input { flex: 1; min-width: 0; }
+.pv-model-row .pv-btn { height: 32px; padding: 0 10px; flex: none; }
+.pv-hint {
+  margin-left: 6px;
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--success);
+}

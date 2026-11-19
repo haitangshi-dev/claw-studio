@@ -29,6 +29,8 @@ function App() {
   const [baseUrl, setBaseUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [model, setModel] = useState('')
+  const [models, setModels] = useState([])
+  const [probing, setProbing] = useState(false)
   const [status, setStatus] = useState(null)
   const [busy, setBusy] = useState('')
   const [note, setNote] = useState('')
@@ -66,7 +68,38 @@ function App() {
     return () => clearInterval(t)
   }, [])
 
+  // 拉模型列表：凭据只用于这一次请求，不写内存、不落盘
+  const probeModels = async () => {
+    if (!baseUrl.trim() || !apiKey.trim()) {
+      setNote('先填 Base URL 和 API Key')
+      setTimeout(() => setNote(''), 3000)
+      return []
+    }
+    setProbing(true)
+    const r = await fetch('/api/ephemeral/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl, apiKey }),
+    })
+      .then((x) => x.json())
+      .catch(() => ({ ok: false, error: '请求失败' }))
+    setProbing(false)
+    if (!r.ok) {
+      setNote(r.error || '获取模型列表失败')
+      setTimeout(() => setNote(''), 5000)
+      return []
+    }
+    const list = r.models || []
+    setModels(list)
+    if (list.length && !model) setModel(list[0])
+    setNote(list.length ? `拉到 ${list.length} 个模型` : '这个端点返回了空列表，手动填模型名吧')
+    setTimeout(() => setNote(''), 4000)
+    return list
+  }
+
   const connect = async () => {
+    // 先探模型列表（探不到也能连，手填模型名即可）
+    if (!models.length) await probeModels()
     setBusy('connect')
     const r = await fetch('/api/ephemeral', {
       method: 'POST',
@@ -216,12 +249,34 @@ function App() {
               />
             </label>
             <label>
-              <span>模型名</span>
-              <input
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder="deepseek-chat"
-              />
+              <span>
+                模型名
+                {models.length > 0 && (
+                  <em className="pv-hint">已自动获取 {models.length} 个</em>
+                )}
+              </span>
+              <div className="pv-model-row">
+                <input
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder="deepseek-chat"
+                  list="pv-model-list"
+                />
+                <datalist id="pv-model-list">
+                  {models.map((m) => (
+                    <option key={m} value={m} />
+                  ))}
+                </datalist>
+                <button
+                  type="button"
+                  className="pv-btn ghost"
+                  onClick={probeModels}
+                  disabled={probing}
+                  title="用当前填的端点与 Key 拉一次模型列表（凭据不保存）"
+                >
+                  {probing ? '拉取中…' : '获取模型'}
+                </button>
+              </div>
             </label>
             <button className="pv-btn primary" onClick={connect} disabled={busy === 'connect'}>
               {busy === 'connect' ? '连接中…' : '连接'}

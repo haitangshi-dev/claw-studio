@@ -447,6 +447,46 @@ def ephemeral_set(payload: dict):
     return {"ok": True, **st}
 
 
+@app.post("/api/ephemeral/models")
+async def ephemeral_probe_models(payload: dict):
+    """用还没保存的凭据探一次模型列表。
+
+    凭据只用于这一次请求：不写内存、不写文件、不进设置。
+    探完就丢，剩下的由用户决定要不要连。
+    """
+    import httpx
+    import provider_proxy as PP
+
+    base = str((payload or {}).get("baseUrl") or "").strip()
+    key = str((payload or {}).get("apiKey") or "").strip()
+    if not base or not key:
+        return {"ok": False, "error": "需要 Base URL 和 API Key"}
+    try:
+        _, models_url = PP.endpoints(base)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as c:
+            r = await c.get(models_url, headers={"Authorization": f"Bearer {key}"})
+        if r.status_code == 401:
+            return {"ok": False, "error": "鉴权失败（401）：Key 不对，或没有这个端点的权限"}
+        if r.status_code == 404:
+            return {"ok": False, "error": "这个端点没有 /models（可能不是 OpenAI 兼容格式），"
+                                          "可以手动填模型名继续"}
+        if r.status_code >= 400:
+            return {"ok": False, "error": f"HTTP {r.status_code}：{r.text[:160]}"}
+        data = r.json() if r.text else {}
+        items = data.get("data") or data.get("models") or []
+        names: list[str] = []
+        for m in items:
+            n = str((m.get("id") or m.get("name") or "") if isinstance(m, dict) else m)
+            if n and n not in names:
+                names.append(n)
+        return {"ok": True, "models": names[:300], "count": len(names)}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:200]}
+
+
 @app.delete("/api/ephemeral")
 def ephemeral_clear():
     import ephemeral as _eph
