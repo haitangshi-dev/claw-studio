@@ -1,0 +1,24 @@
+# Claw Studio —— 运行时依赖（Python 3.10+）
+# 安装：pip install -r requirements.txt
+# 前端：cd web && npm install
+
+# Web 层
+fastapi>=0.110
+uvicorn>=0.27
+pydantic>=2.5
+httpx>=0.26
+
+# 桌面窗口（pywebview 在 Windows 上走 EdgeChromium，需要系统 WebView2）
+pywebview>=5.0
+
+# 记忆检索分词（缺失时自动退化为空格切分）
+jieba>=0.42
+
+# 语音朗读
+edge-tts>=6.1
+
+# 浏览器工具（可选：不装则 browser_control 报未安装）
+playwright>=1.40
+
+# 终端 PTY（可选）
+pywinpty>=2.0

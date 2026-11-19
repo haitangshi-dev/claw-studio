@@ -1,0 +1,40 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ---- 运行期数据（绝不入库）----
+config/config.json
+data/
+logs/
+memory/*.db
+memory/*.db-*
+memory/export/
+sessions/
+workspace/
+webview_data/
+.claw_ask/
+.claw_logs/
+.claw_jobs.json
+*.log
+
+# ---- 前端 ----
+web/node_modules/
+web/dist/
+node_modules/
+
+# ---- 打包产物 ----
+build/
+dist/
+installer/Output/
+*.exe
+*.msi
+*.spec.bak
+
+# ---- 编辑器/系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

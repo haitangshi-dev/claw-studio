@@ -1,0 +1,8 @@
+{
+  "name": "ask_user",
+  "version": "1.0",
+  "description": "ask_user：在主界面浮出选择卡片（轮询+回传通道），用户点选后答案回到模型，超时退回文字列选项",
+  "readonly_safe": true,
+  "enabled": true,
+  "created_at": "2026-10-10 18:20:45"
+}

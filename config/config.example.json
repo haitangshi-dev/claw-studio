@@ -1,0 +1,72 @@
+{
+  "engine": {
+    "server_exe": "",
+    "host": "127.0.0.1",
+    "port": 8181,
+    "log_file": "logs/llama-server.log",
+    "startup_timeout": 150
+  },
+  "model_scan_dirs": [],
+  "default_model": "",
+  "defaults": {
+    "ctx": 32768,
+    "kv_k": "q4_0",
+    "kv_v": "q4_0",
+    "ngl": 999,
+    "flash_attn": true,
+    "temperature": 0.6,
+    "repeat_penalty": 1.1,
+    "repeat_last_n": 64,
+    "reasoning": "auto",
+    "reasoning_format": "deepseek",
+    "thinking_default": true,
+    "reasoning_budget_tokens": 1024,
+    "max_tokens": 16384
+  },
+  "agent": {
+    "max_steps": 0,
+    "output_truncate": 8000,
+    "shell_mode": "bash",
+    "shell_guard": "block",
+    "default_workdir": "workspace",
+    "audit_log": "logs/tool-audit.jsonl",
+    "unattended": false,
+    "max_model_request_retries": 5
+  },
+  "memory": {
+    "db": "memory/memory.db",
+    "export_dir": "memory/export",
+    "l1_budget_chars": 1800,
+    "l2_top_k": 4,
+    "l3_top_k": 3,
+    "l4_recent": 3,
+    "l4_archive_days": 3,
+    "l3_archive_days": 90
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8090
+  },
+  "experts": {
+    "compact": "",
+    "vision": ""
+  },
+  "notify": {
+    "on_done_min_seconds": 60,
+    "wechat": {
+      "enabled": true,
+      "min_seconds": 0
+    }
+  },
+  "pet": {
+    "auto_start": false
+  },
+  "update": {
+    "source_dir": ""
+  },
+  "wechat": {
+    "auto_start": false,
+    "model": "",
+    "permission": "standard"
+  }
+}

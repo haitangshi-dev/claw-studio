@@ -1,0 +1,8 @@
+{
+  "name": "http_request",
+  "version": "1.0",
+  "description": "任意 HTTP 请求（GET/POST…），用来看接口/抓数据",
+  "readonly_safe": true,
+  "enabled": true,
+  "created_at": "2026-10-07 22:05:13"
+}

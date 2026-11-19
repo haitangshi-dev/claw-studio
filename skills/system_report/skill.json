@@ -1,0 +1,6 @@
+{
+  "name": "system_report",
+  "description": "生成系统体检报告（磁盘/内存/关键目录占用）",
+  "created_at": "2026-10-07 21:26:46",
+  "author": "system"
+}

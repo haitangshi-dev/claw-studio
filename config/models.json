@@ -1,0 +1,9 @@
+{
+  "_说明": "每模型档案：只写与 config.json defaults 不同的覆盖项。path 必填；其余键可选（ctx/kv_k/kv_v/ngl/temperature/repeat_penalty/repeat_last_n/reasoning/thinking_default/reasoning_budget_tokens/max_tokens）。未建档的模型自动使用 defaults。",
+  "profiles": {
+    "MiniCPM5-2B-Q4_K_M": {
+      "path": "C:\\llama-cpp-mx150\\models\\MiniCPM5-2B-Q4_K_M.gguf",
+      "note": "默认模型。32K ctx + Q4_0 KV；temp 0.6；repeat 1.1/64。md5 992b33f05c29648987c63e9376c88047（2026-10-03 实测：加载 6.6s、生成约 12 t/s、显存 1898/2048 MiB）"
+    }
+  }
+}

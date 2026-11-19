@@ -1,0 +1,6 @@
+{
+  "name": "ask_user",
+  "description": "在主界面浮出提问卡片让用户点选（走 .claw_ask 通道 + /api/ask 端点），拿到答案返回；界面不可用则退回文字列选项",
+  "created_at": "2026-10-10 18:34:15",
+  "author": "agent"
+}

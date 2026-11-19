@@ -1,0 +1,6 @@
+{
+  "name": "daily_note",
+  "description": "把传入的 text 参数追加到工作目录 notes.md，每行带日期前缀（YYYY-MM-DD）。",
+  "created_at": "2026-10-07 21:28:25",
+  "author": "agent"
+}
