@@ -422,7 +422,20 @@ export default function App() {
   const thinkAtTop = isCloudModel
     ? !!(cloudThinkOpts.length && String(thinkLevel) === String(cloudThinkOpts[cloudThinkOpts.length - 1].k))
     : thinkLevel === -1
-  const [busy, setBusy] = useState(false)
+  // busy 按会话存：一条流在跑不该让别的会话也发不出消息（原来是个全局布尔，
+  // 切到另一个会话想插一句话都被 disabled 挡住，很反直觉）。
+  const [busyMap, setBusyMap] = useState({})
+  const markBusy = (sid, on) => {
+    if (!sid) return
+    setBusyMap((prev) => {
+      if (!!prev[sid] === !!on) return prev
+      const next = { ...prev }
+      if (on) next[sid] = true
+      else delete next[sid]
+      return next
+    })
+  }
+  const busy = !!busyMap[activeId]
   const [experts, setExperts] = useState({})
   const [pendingImages, setPendingImages] = useState([]) // 待发送图片（dataURI）
   const [voiceCfg, setVoiceCfg] = useState(null)
@@ -479,7 +492,9 @@ export default function App() {
     return ctxSize
   })()
   const [showParams, setShowParams] = useState(false)
+  const [toolCount, setToolCount] = useState(0)
   const [showSettings, setShowSettings] = useState(false)
+  const [settingsPane, setSettingsPane] = useState('')   // 打开设置时直接落到哪一页
   // 值守模式 / 无人值守时长：按会话保存（会话 A 与 B 互不影响）
   const modeSession = sessions.find((s) => s.id === activeId) || sessions[0] || {}
   const legacyMode = (() => {
@@ -657,8 +672,8 @@ export default function App() {
       /* 忽略失败：工具侧会超时退回文字版 */
     }
   }
-  const abortRef = useRef(null)
-  const streamSidRef = useRef(null)   // 这一轮流式属于哪个会话（切走后 stop 也要停对）
+  // 中断函数按会话存：单值 ref 会在「A 在跑 → 切到 B 发消息」时被覆盖，A 就停不下来了
+  const abortsRef = useRef({})
   // 用户是否手动按了「停止」：用来区分「手动停」与「因阀门暂停」（后者要续跑）
   const userStoppedRef = useRef(false)
   // 会话状态最新镜像：异步续跑时要拿到最新消息当压缩原料
@@ -859,6 +874,7 @@ export default function App() {
         if (d.default_workdir) setDefaultWorkdir(d.default_workdir)
         if (d.ctx) setCtxSize(d.ctx)
         if (d.overhead_tokens) setOverhead(d.overhead_tokens)
+        if (d.tool_count) setToolCount(d.tool_count)
       })
       .catch(() => {})
   }
@@ -1035,7 +1051,7 @@ export default function App() {
     if (busy) return
     const msgs = session.messages
     const compacted = session.compacted || null
-    setBusy(true)
+    markBusy(session.id, true)
     setActivity({ kind: 'compressing', label: '正在压缩历史…' })
     setToast('正在手动压缩历史…')
     const t0 = Date.now()
@@ -1051,7 +1067,7 @@ export default function App() {
     } catch (e) {
       setToast('压缩失败：' + String(e))
     } finally {
-      setBusy(false)
+      markBusy(session.id, false)
       setActivity({ kind: 'idle', label: '就绪' })
       setTimeout(() => setToast(''), 2600)
       console.log('手动压缩耗时', ((Date.now() - t0) / 1000).toFixed(1) + 's')
@@ -1108,7 +1124,7 @@ export default function App() {
     )
     setToast(next !== compacted ? '历史已压缩，继续这次会话…' : '压缩未产出摘要，直接继续…')
     setTimeout(() => setToast(''), 2000)
-    setBusy(false) // send 内部会重新置 true（send 的闭包里 busy 仍是这一轮开始前的 false，不会自锁）
+    markBusy(sid, false) // send 内部会重新置 true（send 的闭包里 busy 仍是这一轮开始前的 false，不会自锁）
     await send(RESUME_HINT, marked, { resume: true, compacted: next, pauseLeft })
   }
 
@@ -1119,7 +1135,7 @@ export default function App() {
     // resume=true：这是「压缩后续跑」，续跑提示只发给模型，不在界面上多出一条用户消息
     const resume = !!opts.resume
     userStoppedRef.current = false
-    setBusy(true)
+    markBusy(sid, true)
     setActivity({ kind: 'preparing', label: resume ? '继续处理…' : '等待模型响应…' })
 
     // 上下文压缩管理：按"实际携带量"判断，达到触发比例（默认 0.9）时压缩
@@ -1186,7 +1202,7 @@ export default function App() {
       setDraft('')
       setPendingImages([])
     }
-    setBusy(true)
+    markBusy(sid, true)
 
     // 模型参数覆盖（仅附带用户已自定义的项，其余走后端配置默认）
     const paramOverrides = {}
@@ -1201,8 +1217,7 @@ export default function App() {
     // 允许的暂停次数（默认 2 次；压缩无进展时清零，防止来回转圈）
     const pauseLeft = opts.pauseLeft != null ? opts.pauseLeft : 2
 
-    streamSidRef.current = sid
-    abortRef.current = streamChat(
+    abortsRef.current[sid] = streamChat(
       {
         messages: history,
         model: modelKey || undefined,
@@ -1229,9 +1244,9 @@ export default function App() {
           if ((ev.type === 'content' || ev.type === 'step' || ev.type === 'tool_call')
               && baseUsed + liveChars >= effCtxSize * trigger) {
             pausedForCompact = true
-            if (abortRef.current) {
-              abortRef.current()
-              abortRef.current = null
+            if (abortsRef.current[sid]) {
+              abortsRef.current[sid]()
+              delete abortsRef.current[sid]
             }
             setActivity({ kind: 'compressing', label: '上下文已达阀门：暂停会话…' })
             return
@@ -1313,14 +1328,14 @@ export default function App() {
         }
       },
       () => {
-        abortRef.current = null
+        delete abortsRef.current[sid]
         if (pausedForCompact && !userStoppedRef.current) {
           // 因为达到阀门而中止 → 压缩 → 从断点继续
           pausedForCompact = false
           resumeAfterPause({ sid, asstMsgId: contMsg.id, compacted, msgs, pauseLeft: pauseLeft - 1 })
           return
         }
-        setBusy(false)
+        markBusy(sid, false)
         setActivity((a) => (a.kind === 'error'
           ? a
           : { kind: 'idle', label: unattended ? '已完成 · 已暂停并汇报' : '就绪' }))
@@ -1330,10 +1345,11 @@ export default function App() {
 
   const stop = () => {
     userStoppedRef.current = true      // 手动停止 → 不要触发「暂停后继续」
-    if (!abortRef.current) return
-    abortRef.current()
-    abortRef.current = null
-    const sid = streamSidRef.current || session.id
+    const sid = activeId
+    const abort = abortsRef.current[sid]
+    if (!abort) return
+    abort()
+    delete abortsRef.current[sid]
     setSessions((prev) =>
       prev.map((s) =>
         s.id !== sid
@@ -1346,7 +1362,7 @@ export default function App() {
             }
       )
     )
-    setBusy(false)
+    markBusy(sid, false)
     setActivity({ kind: 'idle', label: '已停止' })
     setTimeout(() => setActivity((a) => (a.kind === 'idle' && a.label === '已停止' ? { kind: 'idle', label: '就绪' } : a)), 2000)
   }
@@ -1587,7 +1603,7 @@ export default function App() {
   // 空状态首屏的实时状态条（把「当前拿什么在跑」摆在眼前）
   const heroStats = useMemo(() => {
     const m = models.find((x) => x.key === modelKey)
-    const name = m ? (m.name || m.key) : modelKey
+    const name = m ? (m.name || m.key) : (modelKey || '未配置')
     const running = m ? m.current : false
     const permLabel = permission === 'readonly' ? '只读' : permission === 'full' ? '完全' : permission === 'ask' ? '询问' : '标准'
     const thinkLabel = isCloudModel
@@ -1726,7 +1742,20 @@ export default function App() {
           messages={session.messages}
           compacted={session.compacted}
           streaming={busy}
-          hero={{ stats: heroStats }}
+          hero={{
+            stats: heroStats,
+            toolCount,
+            needSetup: models.length === 0,
+            onSetup: () => {
+              setSettingsPane('providers')
+              setShowSettings(true)
+            },
+            onReload: () => {
+              loadModels()
+              setToast('已重新检测模型…')
+              setTimeout(() => setToast(''), 2000)
+            },
+          }}
           onPickPrompt={(t) => {
             setDraft(t)
             taRef.current?.focus()
@@ -1957,7 +1986,7 @@ export default function App() {
       )}
       {showSettings && (
         <div className="settings-shield" role="dialog" aria-label="设置">
-          <iframe className="settings-frame" title="设置" src="/admin.html?embed=1" />
+          <iframe className="settings-frame" title="设置" src={`/admin.html?embed=1${settingsPane ? `&pane=${settingsPane}` : ''}`} />
         </div>
       )}
       {showMemory && <MemoryPanel onClose={() => setShowMemory(false)} workdir={workdir} />}

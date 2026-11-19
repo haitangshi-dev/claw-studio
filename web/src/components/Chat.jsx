@@ -415,10 +415,10 @@ export function AskCard({ ask, onSubmit, onSkip }) {
 
 // ---------- 消息流 ----------
 const PROMPTS = [
-  { t: '整理文件', d: '把 workspace 里的文件按类型分类', s: '把工作目录里的文件按类型整理到子文件夹，完成后报告结果', icon: <IconFolder size={14} />, kbd: '文件' },
-  { t: '记住偏好', d: '说一次，以后它一直记得', s: '记住：我的回答偏好是简洁直接，先给结论。', icon: <IconBrain size={14} />, kbd: '记忆' },
-  { t: '写个小工具', d: '描述需求，它自己写脚本跑通', s: '写一个 Python 脚本，统计指定文本文件中每个字符出现的次数，并运行它验证', icon: <IconTerminal size={14} />, kbd: '编码' },
-  { t: '做成技能', d: '把常用流程固化，以后一句话复用', s: '把「整理工作目录文件」这件事做成一个技能，以后我一句话就能复用', icon: <IconRefresh size={14} />, kbd: '复用' },
+  { t: '看看代码', d: '分析工作目录的项目结构，指出可能的坑', s: '看一下当前工作目录的项目结构，说明它是做什么的，并指出你认为最容易出问题的地方', icon: <IconFolder size={14} />, kbd: '代码' },
+  { t: '修个 bug', d: '定位原因、改掉、再跑一遍验证', s: '帮我找出这个项目里最明显的一个 bug，说明原因并修好，然后跑一次验证', icon: <IconTerminal size={14} />, kbd: '调试' },
+  { t: '跑条命令', d: '执行并解释输出，不确定的先问我', s: '检查一下当前目录的依赖是否齐全，缺什么告诉我', icon: <IconRefresh size={14} />, kbd: '终端' },
+  { t: '记住约定', d: '说一次，以后每个会话都遵守', s: '记住：这个项目的回答偏好是简洁直接、先给结论，改代码前先说改哪几个文件', icon: <IconBrain size={14} />, kbd: '记忆' },
 ]
 
 export function MessageList({ messages, compacted, streaming, onPickPrompt, onRegenerate, onEdit,
@@ -458,7 +458,7 @@ export function MessageList({ messages, compacted, streaming, onPickPrompt, onRe
                 <CrabMark size={82} />
               </div>
               <div className="w-title">Claw Studio</div>
-              <div className="w-sub">本地优先 · {hero?.toolCount ?? 31} 件工具 · 四层记忆 · 操作可审批</div>
+              <div className="w-sub">本地优先 · {hero?.toolCount || '—'} 件工具 · 四层记忆 · 操作可审批</div>
               {hero?.stats?.length ? (
                 <div className="w-stats">
                   {hero.stats.map((st) => (
@@ -469,7 +469,26 @@ export function MessageList({ messages, compacted, streaming, onPickPrompt, onRe
                   ))}
                 </div>
               ) : null}
-              <div className="w-cards">
+              {hero?.needSetup && (
+                <div className="w-setup">
+                  <div className="w-setup-head">
+                    还没有接上任何模型
+                  </div>
+                  <div className="w-setup-desc">
+                    填一个 OpenAI 兼容供应商（DeepSeek、OpenRouter、自建网关都行），
+                    或者确认本机的 Qoder CLI 已经登录。配好之后立刻就能对话。
+                  </div>
+                  <div className="w-setup-actions">
+                    <button className="w-setup-btn primary" onClick={() => hero.onSetup && hero.onSetup()}>
+                      配置 API 供应商
+                    </button>
+                    <button className="w-setup-btn" onClick={() => hero.onReload && hero.onReload()}>
+                      我已配好，重新检测
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div className="w-cards" style={hero?.needSetup ? { opacity: 0.45, pointerEvents: 'none' } : undefined}>
                 {PROMPTS.map((p) => (
                   <button key={p.t} className="w-card" onClick={() => onPickPrompt && onPickPrompt(p.s)}>
                     <span className="w-card-top">

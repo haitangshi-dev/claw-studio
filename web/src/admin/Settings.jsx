@@ -116,7 +116,15 @@ const NAV = [
 
 export default function Settings({ onClose, onPreviewSplash }) {
   const { settings, set, online } = useSettings()
-  const [active, setActive] = useState('appearance')
+  // 支持 /admin.html?pane=providers 直接落到某一页（主界面「配置 API 供应商」用它）
+  const [active, setActive] = useState(() => {
+    try {
+      const p = new URLSearchParams(window.location.search).get('pane')
+      return p && NAV.some((n) => n.id === p) ? p : 'appearance'
+    } catch (e) {
+      return 'appearance'
+    }
+  })
   const [q, setQ] = useState('')
 
   const nav = useMemo(() => {

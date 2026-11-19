@@ -134,13 +134,29 @@ export default function ApprovalCard({ item, extra = 0, onDone }) {
         >
           允许这次
         </button>
-        <button
-          onClick={() => submit('allow_session')}
-          disabled={busy}
-          style={btn('transparent', 'var(--text)', 'var(--border)')}
-        >
-          本会话允许此类
-        </button>
+        {item.rememberable === false ? (
+          <span
+            style={{
+              fontSize: 11,
+              color: 'var(--text-faint)',
+              border: '1px dashed var(--border)',
+              borderRadius: 8,
+              padding: '0 10px',
+              lineHeight: '30px',
+            }}
+            title="不可撤销的操作不会记住授权：这样点错一次不会连累之后所有同类操作"
+          >
+            此项每次都要确认
+          </span>
+        ) : (
+          <button
+            onClick={() => submit('allow_session')}
+            disabled={busy}
+            style={btn('transparent', 'var(--text)', 'var(--border)')}
+          >
+            本会话允许此类
+          </button>
+        )}
         <button
           onClick={() => (showReason ? submit('deny') : setShowReason(true))}
           disabled={busy}

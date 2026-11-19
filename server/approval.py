@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import uuid
@@ -96,8 +97,43 @@ def classify(name: str, args: dict) -> str:
     return WRITE
 
 
+def _shell_scope(cmd: str) -> str:
+    """shell 的授权粒度：程序名 + 第一个非选项子命令。
+
+    原来 run_shell 没有路径参数，scope 一律是 "-"，于是「本会话允许此类」等于
+    **放行本会话任意命令**（点一次 rm，之后 rm -rf 全不问）。现在：
+    - 复合命令（&& || ; | > <）不记忆，返回 cmd:! —— 一条 `cd x && rm -rf y`
+      的首词是 cd，记住它等于放行 rm。
+    - 单命令取 `程序:子命令`，`git status` 与 `git push` 能区分开。
+    """
+    c = (cmd or "").strip()
+    if not c:
+        return "cmd:-"
+    if any(t in c for t in ("&&", "||", ";", "|", ">", "<", chr(10))):
+        return "cmd:!"
+    parts = c.split()
+    prog = os.path.basename(parts[0]).lower()
+    sub = ""
+    for tok in parts[1:3]:
+        if not tok.startswith("-"):
+            sub = tok.lower()
+            break
+    return f"cmd:{prog}" + (f":{sub}" if sub else "")
+
+
+def _rememberable(name: str, risk: str, scope: str) -> bool:
+    """能不能「本会话允许此类」。不可逆的操作永远不给这个选项。"""
+    if risk == DESTRUCTIVE:
+        return False
+    if name == "run_shell" and scope in ("cmd:!", "cmd:-"):
+        return False
+    return True
+
+
 def _scope(name: str, args: dict, workdir: str | None) -> str:
-    """授权的记忆粒度：路径类按目录，其它按工具本身。"""
+    """授权的记忆粒度：路径类按目录，shell 按程序+子命令，其它按工具本身。"""
+    if name == "run_shell":
+        return _shell_scope(str((args or {}).get("command") or ""))
     for k in ("path", "target", "dst", "src", "file", "dir"):
         v = str((args or {}).get(k) or "").strip()
         if v:
@@ -144,10 +180,12 @@ def _auto_allow(risk: str, policy: str) -> bool:
 def _ask(name: str, args: dict, workdir: str, session: str, risk: str, timeout: int) -> tuple[bool, str]:
     aid = uuid.uuid4().hex[:12]
     title, detail = _preview(name, args)
+    scope = _scope(name, args, workdir)
+    rememberable = _rememberable(name, risk, scope)
     ev = threading.Event()
     rec = {
         "id": aid, "tool": name, "risk": risk, "title": title, "detail": detail,
-        "workdir": workdir or "", "session": session,
+        "workdir": workdir or "", "session": session, "rememberable": rememberable,
         "created_at": int(time.time() * 1000), "deadline": timeout,
     }
     with _lock:
@@ -161,8 +199,12 @@ def _ask(name: str, args: dict, workdir: str, session: str, risk: str, timeout: 
     if res.get("action") == "allow":
         return True, ""
     if res.get("action") == "allow_session":
-        with _lock:
-            _grants.add((session, name, _scope(name, args, workdir)))
+        if rememberable:
+            with _lock:
+                _grants.add((session, name, scope))
+            return True, ""
+        # 卡片上不提供这个选项，但客户端可能是旧版/直接调接口：
+        # 降级成「只这一次」，绝不悄悄放大授权范围。
         return True, ""
     reason = str(res.get("reason") or "").strip()
     return False, reason or "用户拒绝了这个操作"

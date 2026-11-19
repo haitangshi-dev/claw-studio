@@ -1653,6 +1653,13 @@ def status():
         pass
     st["ctx"] = ctx
     st["overhead_tokens"] = _overhead_tokens()
+    # 工具数量由后端说了算：前端写死的 31 一旦加了工具就对不上，属于必然过期的硬编码
+    try:
+        import tools as _tools
+
+        st["tool_count"] = len(_tools.TOOL_SPECS)
+    except Exception:
+        st["tool_count"] = 0
     return st
 
 

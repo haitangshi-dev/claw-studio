@@ -51,6 +51,8 @@ export default function Providers({ settings, set, online }) {
   const [showKey, setShowKey] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState(null)
+  // 必须在 allModels 的 useMemo 之前声明：依赖数组在渲染时就求值，晚声明会 TDZ 崩页
+  const [qoderModels, setQoderModels] = useState([])
 
   const providers = settings.providers || []
   // 角色绑定的值必须是后端认识的模型 key：供应商是 api:<pid>/<model>，
@@ -116,7 +118,6 @@ export default function Providers({ settings, set, online }) {
   }
 
   const [cli, setCli] = useState(null)
-  const [qoderModels, setQoderModels] = useState([])
   useEffect(() => {
     fetch('/api/qoder/status')
       .then((r) => (r.ok ? r.json() : null))
