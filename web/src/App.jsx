@@ -479,6 +479,7 @@ export default function App() {
     return ctxSize
   })()
   const [showParams, setShowParams] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   // 值守模式 / 无人值守时长：按会话保存（会话 A 与 B 互不影响）
   const modeSession = sessions.find((s) => s.id === activeId) || sessions[0] || {}
   const legacyMode = (() => {
@@ -617,6 +618,22 @@ export default function App() {
     const t = setInterval(tick, 1500)
     return () => { stop = true; clearInterval(t) }
   }, [activeId])
+
+  // 设置页在 iframe 里跑，点它自己的关闭按钮时通过 postMessage 通知主窗口
+  useEffect(() => {
+    const onMsg = (e) => {
+      if (e && e.data && e.data.type === 'claw:close-settings') setShowSettings(false)
+    }
+    const onKey = (e) => {
+      if (e.key === 'Escape') setShowSettings(false)
+    }
+    window.addEventListener('message', onMsg)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('message', onMsg)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [])
 
   const answerAskCard = async (val) => {
     const cur = ask
@@ -1665,7 +1682,7 @@ export default function App() {
                 key={p.id}
                 className="credits-chip"
                 title={info.title}
-                onClick={() => setShowParams(true)}
+                onClick={() => setShowSettings(true)}
               >
                 {info.text}
               </span>
@@ -1674,7 +1691,7 @@ export default function App() {
           <button
             className="icon-btn ghost"
             title="设置"
-            onClick={() => setShowParams(true)}
+            onClick={() => setShowSettings(true)}
           >
             <IconGear size={16} />
           </button>
@@ -1937,6 +1954,11 @@ export default function App() {
             )
           }
         />
+      )}
+      {showSettings && (
+        <div className="settings-shield" role="dialog" aria-label="设置">
+          <iframe className="settings-frame" title="设置" src="/admin.html?embed=1" />
+        </div>
       )}
       {showMemory && <MemoryPanel onClose={() => setShowMemory(false)} workdir={workdir} />}
       {showWorkdir && (

@@ -150,6 +150,23 @@ def _project_legacy(s: dict) -> None:
     CFG["wechat"] = {**(CFG.get("wechat") or {}), "auto_start": bool(w.get("enabled") or w.get("autoStart"))}
     perm = (s.get("permission") or {}).get("onDuty", "ask")
     CFG.setdefault("agent", {})["onduty_permission"] = _PERM_TO_LEGACY.get(perm, "standard")
+
+    # 角色绑定 → 旧键：以前这两者各存一份、互不相干，设置页绑了模型实际不生效。
+    # smart 写进 default_model，其余写进 experts.{vision,compact,fast}，老代码直接读得到。
+    roles = s.get("roles") or {}
+    ex = dict(CFG.get("experts") or {})
+    for _rk in ("vision", "compact", "fast"):
+        if str(roles.get(_rk) or "").strip():
+            ex[_rk] = str(roles[_rk]).strip()
+    CFG["experts"] = ex
+    smart = str(roles.get("smart") or "").strip()
+    if smart:
+        CFG["default_model"] = smart
+    else:
+        dm = str(CFG.get("default_model") or "").strip()
+        ids = [str(p.get("id")) for p in (s.get("providers") or [])]
+        if dm.startswith("api:") and not any(dm.startswith(f"api:{i}/") for i in ids):
+            CFG["default_model"] = ""
     try:
         disk = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except Exception:
@@ -157,6 +174,9 @@ def _project_legacy(s: dict) -> None:
     disk["notify"] = CFG["notify"]
     disk["wechat"] = CFG["wechat"]
     disk.setdefault("agent", {})["onduty_permission"] = CFG["agent"]["onduty_permission"]
+    if CFG.get("experts"):
+        disk["experts"] = CFG["experts"]
+    disk["default_model"] = str(CFG.get("default_model") or "")
     try:
         _atomic_write(CONFIG_PATH, disk)
     except Exception:
@@ -264,9 +284,13 @@ def delete_provider(pid: str):
     # 角色绑定指向它的一并清掉
     roles = dict(cur.get("roles") or {})
     for k, v in list(roles.items()):
-        if str(v).startswith(f"{pid}:"):
+        if str(v).startswith(f"{pid}:") or str(v).startswith(f"api:{pid}/"):
             roles[k] = ""
     cur["roles"] = roles
+    # 默认模型如果指向这个供应商，一并清掉：否则下次对话直接报「未知模型」，
+    # 而且用户找不到原因（设置页里供应商已经没了）。
+    if CFG is not None and str(CFG.get("default_model") or "").startswith(f"api:{pid}/"):
+        CFG["default_model"] = ""
     saved = save_settings(cur)
     return {"ok": True, "providers": [_public_provider(p) for p in (saved.get("providers") or [])]}
 
@@ -287,7 +311,14 @@ async def test_provider(payload: dict):
             found = next((p for p in (s.get("providers") or []) if p.get("id") == pid), {})
             key = unprotect(found.get("_apiKey") or "")
     headers = {"Authorization": f"Bearer {key}"} if key else {}
-    url = f"{base}/models"
+    # base 可能填到根（https://api.xxx.com）也可能填到 /v1，统一交给 provider_proxy 归一化，
+    # 否则「少写 /v1」会让探活 404、用户以为 key 填错了。
+    import provider_proxy as _pp
+
+    try:
+        _chat, url = _pp.endpoints(base)
+    except ValueError:
+        url = f"{base}/models"
     try:
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as cli:
             r = await cli.get(url, headers=headers)

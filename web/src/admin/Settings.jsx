@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   Brain,
   CalendarClock,
@@ -124,6 +124,17 @@ export default function Settings({ onClose, onPreviewSplash }) {
     if (!k) return NAV
     return NAV.filter((n) => n.label.toLowerCase().includes(k) || n.kw.includes(k))
   }, [q])
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape' && onClose) {
+        e.preventDefault()
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   const current = nav.find((n) => n.id === active) || nav[0] || NAV[0]
 

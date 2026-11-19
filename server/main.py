@@ -550,7 +550,7 @@ def models():
                 }
             )
     default_key = str(CFG.get("default_model") or "")
-    if cloud_only and not default_key.startswith("qoder:"):
+    if cloud_only and not (default_key.startswith("qoder:") or default_key.startswith("api:")):
         default_key = "qoder:Auto"
     # Qoder 云端模型（官方 CLI 已安装并登录时并入；失败静默隐藏）
     try:
@@ -582,6 +582,48 @@ def models():
                 )
     except Exception:
         pass
+    # 设置页里配好的 OpenAI 兼容供应商：每个供应商的模型并进清单，
+    # key 形如 api:<pid>/<model>，选中它就直接走那家的接口（不再需要另配一套环境）。
+    try:
+        import provider_proxy as PP
+
+        for pv in (_settings_api.load_settings().get("providers") or []):
+            pid = str(pv.get("id") or "")
+            if not pid or not pv.get("_apiKey"):
+                continue
+            names = [str(x) for x in (pv.get("models") or []) if str(x).strip()]
+            if not names:
+                names = [str(pv.get("model") or "").strip()]
+            names = [n for n in names if n]
+            if not names:
+                continue
+            for name in names:
+                key = PP.key_for(pid, name)
+                out.append(
+                    {
+                        "key": key,
+                        "name": f"{pv.get('name') or pid} · {name}",
+                        "arch": "",
+                        "ctx_train": 128000,
+                        "ctx": 128000,
+                        "size_label": "",
+                        "source": "provider",
+                        "size_mb": None,
+                        "has_profile": False,
+                        "current": bool(default_key == key),
+                        "cloud": True,
+                        "provider": "api",
+                        "tools": True,    # OpenAI 兼容端点支持 function calling，走本地工具循环
+                        "images": False,
+                        "credits": "",
+                        "free": False,
+                    }
+                )
+            if not default_key and out:
+                default_key = PP.key_for(pid, names[0])
+    except Exception:
+        pass
+
     return {"models": out, "default": default_key, "current_path": cur, "cloud_only": cloud_only}
 
 
@@ -1108,6 +1150,31 @@ async def qoder_chat_shim(payload: dict, session: str = "default",
                        cwd=cwd or None, attachments=atts, unattended=bool(unattended)),
         media_type="text/event-stream",
     )
+
+
+@app.post("/internal/provider/v1/chat/completions")
+async def provider_chat_shim(payload: dict, pid: str = "", model: str = ""):
+    """本地垫片：把 agent 循环的请求转发到设置页里配好的 OpenAI 兼容供应商（SSE 直通）。"""
+    import provider_proxy as PP
+
+    try:
+        resp, body = await PP.stream(pid, model, payload)
+    except LookupError as e:
+        return JSONResponse({"error": {"message": str(e), "type": "invalid_request_error"}}, status_code=404)
+    except ValueError as e:
+        return JSONResponse({"error": {"message": str(e), "type": "invalid_request_error"}}, status_code=400)
+    except Exception as e:
+        return JSONResponse(
+            {"error": {"message": f"连接供应商失败：{type(e).__name__}: {e}"[:300],
+                       "type": "upstream_error"}},
+            status_code=502,
+        )
+    if resp.status_code >= 400:
+        raw = await resp.aread()
+        await resp.aclose()
+        return Response(content=raw, status_code=resp.status_code,
+                        media_type=resp.headers.get("content-type", "application/json"))
+    return StreamingResponse(body, media_type="text/event-stream")
 
 
 @app.get("/internal/qoder/models")
@@ -1849,7 +1916,8 @@ async def chat(req: ChatRequest):
     # 全局只走云端：本地模型一律重定向到默认 Qoder 模型
     if CFG.get("cloud_only"):
         _m = str(req.model or CFG.get("default_model") or "qoder:Auto")
-        if not _m.startswith("qoder:"):
+        # api: 前缀是设置页里配好的供应商，同样属于「云端」，不应被重定向掉
+        if not (_m.startswith("qoder:") or _m.startswith("api:")):
             _m = "qoder:Auto"
         req.model = _m
     # WorkBuddy 通道已移除：旧会话/旧选择命中的模型给出明确提示（SSE 错误事件）
@@ -1858,8 +1926,27 @@ async def chat(req: ChatRequest):
             yield sse({"type": "error", "message": "WorkBuddy 通道已移除：请在模型菜单选择 Qoder 或本地模型"})
             yield sse({"type": "done", "steps": 0})
         return StreamingResponse(_wb_gone(), media_type="text/event-stream")
+    # 没指定模型时用默认模型：api:/qoder: 是「通道型」key，必须原样透传，
+    # 否则会走到本地模型解析里报「未知模型」，表现为默认模型永远回空。
+    if not req.model:
+        _d = str(CFG.get("default_model") or "")
+        if _d.startswith("api:") or _d.startswith("qoder:"):
+            req.model = _d
+        elif not _d.strip():
+            # 一个模型都没配时给明确指引，而不是让下游抛「未知模型: 」
+            async def _no_model():
+                yield sse({"type": "error",
+                           "message": "还没有可用的模型：打开设置 → 模型与 API，"
+                                      "填一个 OpenAI 兼容供应商（或确认 Qoder CLI 已登录）"})
+                yield sse({"type": "done", "steps": 0})
+            return StreamingResponse(_no_model(), media_type="text/event-stream")
     is_qoder = bool(req.model) and str(req.model).startswith("qoder:")
     is_cloud = (not is_qoder) and bool(req.model) and str(req.model).startswith("wb:")
+    import provider_proxy as PP
+
+    _prov = PP.parse_key(str(req.model or "")) if not (is_qoder or is_cloud) else None
+    is_provider = _prov is not None
+    prov_pid, prov_model = (_prov or ("", ""))
     cloud_id = ""
     qoder_id = ""
     wb_meta: dict | None = None
@@ -1873,6 +1960,15 @@ async def chat(req: ChatRequest):
             wb_meta = next((m for m in WB.catalog() if m["id"] == cloud_id), None)
         except Exception:
             wb_meta = None
+    elif is_provider:
+        # 用户在设置页配好的 OpenAI 兼容供应商：不走本地模型，也不懒启动任何进程
+        key, path, params = str(req.model), None, {}
+        if PP.find_provider(prov_pid) is None:
+            async def _no_provider():
+                yield sse({"type": "error",
+                           "message": f"供应商 {prov_pid} 不存在（可能已在设置页删除），请重新选择模型"})
+                yield sse({"type": "done", "steps": 0})
+            return StreamingResponse(_no_provider(), media_type="text/event-stream")
     else:
         try:
             key, path, params = resolve_for_chat(req.model)
@@ -1884,7 +1980,8 @@ async def chat(req: ChatRequest):
 
     # 工作目录：请求级 > 配置默认（相对路径以项目根解析）
     permission = normalize_permission(req.permission)
-    _mem_cfg = {**MEM_CFG, "l1_budget_chars": _memory_budget(key, is_qoder)}
+    _mem_budget_key = key if not is_provider else f"api:{prov_model}"
+    _mem_cfg = {**MEM_CFG, "l1_budget_chars": _memory_budget(_mem_budget_key, is_qoder)}
     wd_raw = req.workdir or CFG.get("agent", {}).get("default_workdir", "workspace")
     workdir = Path(wd_raw)
     if not workdir.is_absolute():
@@ -2097,6 +2194,12 @@ async def chat(req: ChatRequest):
     elif is_cloud:
         _port = SELF_PORT or CFG["server"]["port"]
         chat_url = f"http://127.0.0.1:{_port}/internal/wb/v1/chat/completions"
+    elif is_provider:
+        _port = SELF_PORT or CFG["server"]["port"]
+        chat_url = (
+            f"http://127.0.0.1:{_port}/internal/provider/v1/chat/completions"
+            f"?pid={quote(prov_pid)}&model={quote(prov_model)}"
+        )
     else:
         chat_url = f"{SERVER.base}/v1/chat/completions"
 
@@ -2175,7 +2278,7 @@ async def chat(req: ChatRequest):
                 max_steps=max_steps,
                 agent_cfg=agent_cfg,
                 model=(qoder_id if is_qoder else (cloud_id if is_cloud else None)),
-                reasoning_effort=(req.reasoning_effort if (is_cloud or is_qoder) else None),
+                reasoning_effort=(req.reasoning_effort if (is_cloud or is_qoder or is_provider) else None),
                 own_tools=is_qoder,
             ):
                 t = ev.get("type")
@@ -2291,13 +2394,23 @@ _COMPRESS_PROMPT = (
 @app.post("/api/compress")
 async def compress(req: CompressRequest):
     """把一段对话历史交给模型压缩成摘要（供前端上下文压缩管理调用）。支持本地与云端专家。"""
-    if CFG.get("cloud_only") and not str(req.model or "").startswith("qoder:"):
+    # 未指定压缩专家时：优先 roles.compact（设置页里绑的），退回默认模型。
+    # 通道型 key（qoder:/api:/wb:）必须原样透传，否则会被当成本地模型解析报「未知模型」。
+    if not req.model:
+        _c = str((CFG.get("experts") or {}).get("compact") or CFG.get("default_model") or "")
+        if _c.startswith(("qoder:", "api:", "wb:")):
+            req.model = _c
+    if CFG.get("cloud_only") and not str(req.model or "").startswith(("qoder:", "api:")):
         req.model = str(CFG.get("default_model") or "qoder:Auto")
-        if not req.model.startswith("qoder:"):
+        if not req.model.startswith(("qoder:", "api:")):
             req.model = "qoder:Auto"
     is_qoder_expert = bool(req.model) and str(req.model).startswith("qoder:")
     is_cloud = bool(req.model) and str(req.model).startswith("wb:")
-    if is_cloud or is_qoder_expert:
+    import provider_proxy as PP
+
+    _cpp = PP.parse_key(str(req.model or "")) if not (is_qoder_expert or is_cloud) else None
+    is_prov_expert = _cpp is not None
+    if is_cloud or is_qoder_expert or is_prov_expert:
         key = str(req.model)
     else:
         try:
@@ -2339,6 +2452,18 @@ async def compress(req: CompressRequest):
                 model=str(req.model)[6:],
                 prompt=_COMPRESS_PROMPT + "\n\n" + convo_text,
             )
+        elif is_prov_expert:
+            summary = await PP.complete(
+                _cpp[0], _cpp[1],
+                {
+                    "messages": [
+                        {"role": "system", "content": "你是一个对话压缩器，输出精炼准确的摘要。"},
+                        {"role": "user", "content": _COMPRESS_PROMPT + "\n\n" + convo_text},
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 900,
+                },
+            )
         elif is_cloud:
             # 云端推理模型会把 max_tokens 大量消耗在思考上——压缩/识别任务不设小上限
             summary = await WB.complete(
@@ -2360,6 +2485,7 @@ async def compress(req: CompressRequest):
         # 压缩完切回会话主模型（单实例：下次对话无缝衔接；云端模型无需切回）
         if (req.restore_model and req.restore_model != key
                 and not str(req.restore_model).startswith("qoder:")
+                and not str(req.restore_model).startswith("api:")
                 and not str(req.restore_model).startswith("wb:")):
             try:
                 rk, rpath, rparams = resolve_profile(req.restore_model)

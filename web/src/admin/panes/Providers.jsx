@@ -53,16 +53,17 @@ export default function Providers({ settings, set, online }) {
   const [testResult, setTestResult] = useState(null)
 
   const providers = settings.providers || []
-  const allModels = useMemo(
-    () =>
-      providers.flatMap((p) =>
-        (p.models?.length ? p.models : p.model ? [p.model] : []).map((m) => ({
-          value: `${p.id}:${m}`,
-          label: `${p.name} · ${m}`,
-        })),
-      ),
-    [providers],
-  )
+  // 角色绑定的值必须是后端认识的模型 key：供应商是 api:<pid>/<model>，
+  // 写成 <pid>:<model> 时后端查不到供应商，表现为「绑了但对话还是走原模型」。
+  const allModels = useMemo(() => {
+    const own = providers.flatMap((p) =>
+      (p.models?.length ? p.models : p.model ? [p.model] : []).map((m) => ({
+        value: `api:${p.id}/${m}`,
+        label: `${p.name} · ${m}`,
+      })),
+    )
+    return [...own, ...qoderModels]
+  }, [providers, qoderModels])
 
   const startAdd = () => {
     setEditing({ ...EMPTY, id: uid() })
@@ -115,12 +116,25 @@ export default function Providers({ settings, set, online }) {
   }
 
   const [cli, setCli] = useState(null)
+  const [qoderModels, setQoderModels] = useState([])
   useEffect(() => {
     fetch('/api/qoder/status')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setCli(d))
       .catch(() => setCli(null))
   }, [])
+  useEffect(() => {
+    fetch('/api/models')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const q = ((d && d.models) || [])
+          .filter((m) => m.source === 'qoder')
+          .map((m) => ({ value: m.key, label: m.name || m.key }))
+        setQoderModels(q)
+      })
+      .catch(() => setQoderModels([]))
+  }, [])
+
   const today = cli?.usage ? Object.entries(cli.usage).sort().pop() : null
 
   return (
@@ -190,7 +204,7 @@ export default function Providers({ settings, set, online }) {
                   <span className="flex items-center gap-2">
                     <StatusDot tone={p.apiKey ? 'success' : 'warning'} />
                     {p.name}
-                    {settings.roles?.smart?.startsWith(`${p.id}:`) && (
+                    {String(settings.roles?.smart || "").startsWith(`api:${p.id}/`) && (
                       <Badge tone="primary">主力</Badge>
                     )}
                   </span>

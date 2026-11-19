@@ -6,9 +6,19 @@ import Splash from './Splash'
 import Settings from './Settings'
 import { loadLocal } from './store'
 
+// 嵌在主窗口里（设置覆盖层）时不要播启动动画，也不显示「重新打开」兜底页——
+// 那两样都是独立窗口才需要的。
+const EMBEDDED = (() => {
+  try {
+    return window.self !== window.top
+  } catch (e) {
+    return true
+  }
+})()
+
 function App() {
   const boot = loadLocal()
-  const [splash, setSplash] = useState(boot.general?.splashEnabled !== false)
+  const [splash, setSplash] = useState(!EMBEDDED && boot.general?.splashEnabled !== false)
   const [open, setOpen] = useState(true)
   const [round, setRound] = useState(0)
 
@@ -18,10 +28,21 @@ function App() {
     setRound((r) => r + 1)
   }, [])
 
+  const close = () => {
+    setOpen(false)
+    if (EMBEDDED) {
+      try {
+        window.parent.postMessage({ type: 'claw:close-settings' }, '*')
+      } catch (e) {
+        /* 跨域时忽略，父窗口还有自己的关闭方式 */
+      }
+    }
+  }
+
   return (
     <div className="h-full">
       {open ? (
-        <Settings onClose={() => setOpen(false)} onPreviewSplash={replay} />
+        <Settings onClose={close} onPreviewSplash={replay} />
       ) : (
         <div className="flex h-full flex-col items-center justify-center gap-3">
           <p className="m-0 text-[13px] text-muted">设置已关闭（预览模式）</p>
