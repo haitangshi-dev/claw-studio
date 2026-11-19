@@ -286,6 +286,10 @@ def memory_write(args: dict, workdir: str, cfg: dict) -> str:
         importance=imp_arg,
         dedup=(layer != 4),
         workspace=target,
+        # 可追溯：这条记忆是哪次会话写进来的，出问题能查到出处
+        kind=str(args.get("kind") or ("fact" if layer == 1 else "note"))[:24],
+        source_session=str(cfg.get("_session_id") or cfg.get("session") or "")[:80],
+        valid_until=str(args.get("valid_until") or "")[:19],
     )
     entry = store.get_entry(eid) or {}
     scope_txt = "全局" if target == GLOBAL_SCOPE else _ws_label(cfg)

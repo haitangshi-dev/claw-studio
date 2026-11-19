@@ -15,6 +15,7 @@ summary 字段：每条记忆的「结论」（建议 ≤40 字）。注入只�
 """
 from __future__ import annotations
 
+import math
 import os
 import sqlite3
 import threading
@@ -89,6 +90,14 @@ _MIGRATIONS = [
     ("entries", "pin", "ALTER TABLE entries ADD COLUMN pin INTEGER DEFAULT 0"),
     ("entries", "workspace", "ALTER TABLE entries ADD COLUMN workspace TEXT DEFAULT 'global'"),
     ("entries", "source_workspace", "ALTER TABLE entries ADD COLUMN source_workspace TEXT DEFAULT ''"),
+    ("entries", "kind", "ALTER TABLE entries ADD COLUMN kind TEXT DEFAULT ''"),
+    ("entries", "source_session", "ALTER TABLE entries ADD COLUMN source_session TEXT DEFAULT ''"),
+    ("entries", "source_msg", "ALTER TABLE entries ADD COLUMN source_msg TEXT DEFAULT ''"),
+    ("entries", "strength", "ALTER TABLE entries ADD COLUMN strength REAL DEFAULT 1.0"),
+    ("entries", "supersedes", "ALTER TABLE entries ADD COLUMN supersedes INTEGER DEFAULT 0"),
+    ("entries", "superseded_by", "ALTER TABLE entries ADD COLUMN superseded_by INTEGER DEFAULT 0"),
+    ("entries", "valid_until", "ALTER TABLE entries ADD COLUMN valid_until TEXT DEFAULT ''"),
+    ("entries", "merged_into", "ALTER TABLE entries ADD COLUMN merged_into INTEGER DEFAULT 0"),
 ]
 
 # 各层建议的单条正文上限（字）。超限只提醒不截断，避免丢数据。
@@ -292,7 +301,9 @@ class MemoryStore:
                   importance: int | None = None, session_id: str | None = None,
                   summary: str = "", dedup: bool = True,
                   workspace: str | None = GLOBAL_SCOPE,
-                  source_workspace: str = "") -> int:
+                  source_workspace: str = "",
+                  kind: str = "", source_session: str = "", source_msg: str = "",
+                  valid_until: str = "") -> int:
         """写入一条记忆。summary 为结论（建议 ≤40 字），注入时只读它。
 
         importance 省略时按层给默认值（LAYER_DEFAULT_IMPORTANCE）：
@@ -314,8 +325,16 @@ class MemoryStore:
         ts = _now()
         ws = normalize_scope(workspace)
 
+        superseded_id = 0
         if dedup:
             dup = self._find_duplicate(layer, title, content, workspace=ws)
+            # 同标题但结论不同 → 不是「同一条记忆的新版本」，而是「旧结论被取代」。
+            # 合并会把两种结论搅在一起（历史上出现过），所以改成保留旧条目 + 标记取代。
+            if dup is not None and self._conflicts(dup, summary):
+                self._exec("UPDATE entries SET status='superseded', updated_at=? WHERE id=?",
+                           (ts, int(dup["id"])))
+                superseded_id = int(dup["id"])
+                dup = None
             if dup is not None:
                 old_c = (dup.get("content") or "").strip()
                 # 正文有实质新增才追加（避免覆盖丢信息，也避免无限膨胀）
@@ -340,11 +359,17 @@ class MemoryStore:
 
         eid = self._exec(
             "INSERT INTO entries (layer, title, content, summary, tags, importance,"
-            " session_id, workspace, source_workspace, created_at, updated_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            " session_id, workspace, source_workspace, created_at, updated_at,"
+            " kind, source_session, source_msg, valid_until)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (layer, title, content, summary, normalize_tags(tags), imp, session_id,
-             ws, normalize_scope(source_workspace) if source_workspace else "", ts, ts),
+             ws, normalize_scope(source_workspace) if source_workspace else "", ts, ts,
+             str(kind or "")[:24], str(source_session or "")[:80], str(source_msg or "")[:80],
+             str(valid_until or "")[:19]),
         )
+        if superseded_id:
+            self._exec("UPDATE entries SET superseded_by=? WHERE id=?", (eid, superseded_id))
+            self._exec("UPDATE entries SET supersedes=? WHERE id=?", (superseded_id, eid))
         self.archive_maintenance()
         self.export_markdown()
         return eid
@@ -546,28 +571,46 @@ class MemoryStore:
             return top
 
         now = datetime.now()
+        # ---- BM25：词频做长度归一，避免「条目越长越容易命中」的霸榜问题 ----
+        k1, b = 1.4, 0.72
+        n_docs = max(1, len(rows))
+        lens = {
+            e["id"]: (len(e["title"]) * 3 + len(e["tags"] or "") * 2
+                      + len(e.get("summary") or "") * 2 + len(e["content"]))
+            for e in rows
+        }
+        avgdl = sum(lens.values()) / n_docs
+        df = {}
+        for t in toks:
+            q = t.lower()
+            df[t] = sum(
+                1 for e in rows
+                if q in (e["title"] + " " + (e["tags"] or "") + " "
+                         + (e.get("summary") or "") + " " + e["content"]).lower()
+            )
         scored = []
         for e in rows:
-            title_l, tags_l = e["title"].lower(), (e["tags"] or "").lower()
-            summary_l = (e.get("summary") or "").lower()
-            content_l = e["content"].lower()
-            score = 0
+            tl, gl = e["title"].lower(), (e["tags"] or "").lower()
+            sl, cl = (e.get("summary") or "").lower(), e["content"].lower()
+            tf = 0.0
+            idf_sum = 0.0
             for t in toks:
-                tl = t.lower()
-                if tl in title_l:
-                    score += 3
-                if tl in tags_l:
-                    score += 2
-                if tl in summary_l:      # 结论命中权重高于正文（结论更能代表这条记忆）
-                    score += 2
-                if tl in content_l:
-                    score += 1
-            if score <= 0:
+                q = t.lower()
+                local = 3 * tl.count(q) + 2 * gl.count(q) + 2 * sl.count(q) + cl.count(q)
+                if local <= 0:
+                    continue
+                tf += local
+                d = df.get(t, 0)
+                idf_sum += math.log(1.0 + (n_docs - d + 0.5) / (d + 0.5))
+            if tf <= 0 or idf_sum <= 0:
                 continue
+            denom = tf + k1 * (1 - b + b * lens[e["id"]] / max(1.0, avgdl))
+            bm25 = idf_sum * (tf * (k1 + 1)) / max(1e-6, denom)
             ref = _parse_ts(e["last_hit_at"]) or _parse_ts(e["updated_at"]) or now
             days = max(0.0, (now - ref).total_seconds() / 86400)
-            recency = 1.0 / (1.0 + days / 30.0)          # 30 天一档衰减
-            final = (score + 0.5 * e["importance"]) * recency
+            recency = 1.0 / (1.0 + days / 30.0)
+            strength = float(e["strength"] if "strength" in e.keys() and e["strength"] else 1.0)
+            final = (bm25 + 0.5 * e["importance"]) * recency * min(1.6, strength)
             scored.append((final, e))
         scored.sort(key=lambda x: x[0], reverse=True)
         top = [e for _, e in scored[: max(1, int(top_k))]]
@@ -615,6 +658,14 @@ class MemoryStore:
         """
         rows = self.get_layer(1, scopes=scopes)
         budget = int(budget_chars)
+        # 超预算先把「最久未用 + 非锁定 + 重要度<5」的条目降级到 L2，再重新取一次。
+        # 只提醒不处理的结果是：模型从不主动精简，常驻块只会越来越肥。
+        if budget > 0 and rows:
+            used_now = sum(self._l1_cost(e, entry_limit, content_limit) for e in rows)
+            if used_now > budget:
+                if self.trim_l1(budget, scopes=scopes, entry_limit=entry_limit,
+                                content_limit=content_limit):
+                    rows = self.get_layer(1, scopes=scopes)
         out, used = [], 0
         charged: list[tuple[dict, int]] = []
         for e in rows:
@@ -638,7 +689,90 @@ class MemoryStore:
         }
         return out, meta
 
-    # ---------- 归档维护 ----------
+        # ---------- 预算 / 冲突 / 体检 ----------
+    def _l1_cost(self, e: dict, entry_limit: int = L1_INJECT_LIMIT,
+                 content_limit: int = INJECT_CONTENT_LIMIT) -> int:
+        s = (e.get("summary") or "").strip()
+        vis = min(len(s), entry_limit) if s else min(len(e["content"]), content_limit)
+        return len(e["title"]) + vis + 8
+
+    def trim_l1(self, budget: int, scopes=None, entry_limit: int = L1_INJECT_LIMIT,
+                content_limit: int = INJECT_CONTENT_LIMIT) -> list[dict]:
+        """L1 超预算时自动降级（不是删除）：按「最久未用」优先降到 L2，可检索、可回溯。"""
+        rows = self.get_layer(1, scopes=scopes)
+        total = sum(self._l1_cost(e, entry_limit, content_limit) for e in rows)
+        if budget <= 0 or total <= budget:
+            return []
+        cand = [e for e in rows
+                if not int(e.get("pin") or 0) and int(e.get("importance") or 3) < 5]
+        cand.sort(key=lambda e: (e.get("last_hit_at") or "", e.get("updated_at") or ""))
+        demoted = []
+        for e in cand:
+            if total <= budget:
+                break
+            self._exec(
+                "UPDATE entries SET layer=2, updated_at=?, "
+                "tags=CASE WHEN instr(tags,'由L1降级')>0 THEN tags "
+                "WHEN tags IS NULL OR tags='' THEN '由L1降级' ELSE tags || ',由L1降级' END "
+                "WHERE id=?",
+                (_now(), int(e["id"])),
+            )
+            total -= self._l1_cost(e, entry_limit, content_limit)
+            demoted.append({"id": e["id"], "title": e["title"]})
+        if demoted:
+            self.export_markdown()
+        return demoted
+
+    @staticmethod
+    def _conflicts(dup: dict, summary: str) -> bool:
+        """同标题、但两条结论几乎不重合 → 视为「旧结论被取代」。"""
+        old_s = (dup.get("summary") or "").strip()
+        new_s = (summary or "").strip()
+        if len(old_s) < 4 or len(new_s) < 4:
+            return False
+        a, b = set(old_s), set(new_s)
+        if not a or not b:
+            return False
+        return (len(a & b) / max(1, len(a | b))) < 0.45
+
+    def health(self, budget_chars: int = 1800) -> dict:
+        """记忆体检：重复、注入了却从没用过、过期、被取代、L1 占用。"""
+        rows = self._rows("SELECT * FROM entries", ())
+        active = [e for e in rows if e.get("status") == "active"]
+        by_title: dict[str, list] = {}
+        for e in active:
+            by_title.setdefault(e["title"], []).append(e)
+        dups = [{"title": t, "ids": [x["id"] for x in v], "layers": sorted({x["layer"] for x in v})}
+                for t, v in by_title.items() if len(v) > 1]
+        never = [
+            {"id": e["id"], "title": e["title"], "layer": e["layer"],
+             "inject": int(e.get("inject_count") or 0)}
+            for e in active
+            if int(e.get("hit_count") or 0) == 0 and int(e.get("inject_count") or 0) >= 3
+        ]
+        l1 = [e for e in active if int(e["layer"]) == 1]
+        used = sum(self._l1_cost(e) for e in l1)
+        now = _now()
+        expired = [
+            {"id": e["id"], "title": e["title"], "valid_until": e.get("valid_until")}
+            for e in active
+            if (e.get("valid_until") or "") and str(e["valid_until"]) < now
+        ]
+        layers = {}
+        for e in active:
+            layers[int(e["layer"])] = layers.get(int(e["layer"]), 0) + 1
+        return {
+            "total": len(active),
+            "layers": layers,
+            "duplicates": dups[:20],
+            "never_hit": never[:20],
+            "expired": expired[:20],
+            "l1": {"count": len(l1), "used": used, "budget": int(budget_chars),
+                   "over": max(0, used - int(budget_chars))},
+            "superseded": len([e for e in rows if e.get("status") == "superseded"]),
+        }
+
+# ---------- 归档维护 ----------
     def _keep_words(self) -> list[str]:
         keep = self.cfg.get("archive_keep_keywords") or ARCHIVE_KEEP_KEYWORDS
         if isinstance(keep, (list, tuple)):

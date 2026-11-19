@@ -385,6 +385,32 @@ PLAN.configure(DATA_ROOT)
 app.include_router(PLAN.router)
 
 
+def _memory_budget(model_key: str = "", is_qoder: bool = False) -> int:
+    """L1 常驻预算 = 模型上下文 × 设置里的比例，夹在 1200–8000 字。
+
+    固定 1800 字对不同模型的代价完全不同：32K 窗口的 1800 字是 5%，1M 窗口的 1800 字不到 0.2%。
+    按比例算，才不会出现「小模型被记忆挤爆 / 大模型记忆饿死」两头不讨好的情况。
+    """
+    ctx = 32768
+    try:
+        if is_qoder:
+            from qoder import _ctx_for
+
+            ctx = int(_ctx_for(str(model_key).split(":", 1)[-1]))
+        elif model_key:
+            prof = resolve_profile(model_key) or {}
+            ctx = int(prof.get("ctx") or (CFG.get("defaults") or {}).get("ctx") or 32768)
+    except Exception:
+        pass
+    ratio = 6.0
+    try:
+        ratio = float((_settings_api.load_settings().get("memory") or {}).get("budgetRatio") or 6)
+    except Exception:
+        pass
+    return max(1200, min(8000, int(ctx * ratio / 100.0)))
+
+
+
 def sse(obj: dict) -> str:
     return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
@@ -1640,6 +1666,15 @@ def memory_patch(entry_id: int, req: EntryPatch):
     return {"ok": True, "entry": out, "notice": tag_notice(out.get("tags") or "")}
 
 
+@app.get("/api/memory/health")
+def memory_health(workspace: str = ""):
+    """记忆体检：重复 / 注入了从没用过 / 过期 / 被取代 / L1 占用。"""
+    try:
+        return {"ok": True, **STORE.health(int(MEM_CFG.get("l1_budget_chars", 1800)))}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
+
+
 @app.get("/api/memory/tags")
 def memory_tags_overview(top: int = 60):
     return {"tags": STORE.tags_overview(top)}
@@ -1854,6 +1889,7 @@ async def chat(req: ChatRequest):
 
     # 工作目录：请求级 > 配置默认（相对路径以项目根解析）
     permission = normalize_permission(req.permission)
+    _mem_cfg = {**MEM_CFG, "l1_budget_chars": _memory_budget(key, is_qoder)}
     wd_raw = req.workdir or CFG.get("agent", {}).get("default_workdir", "workspace")
     workdir = Path(wd_raw)
     if not workdir.is_absolute():
@@ -2013,7 +2049,7 @@ async def chat(req: ChatRequest):
     )
     _mem_meta: dict = {}
     mem_block = build_memory_block(STORE, user_query=user_query, session_id=session_id,
-                                   cfg=MEM_CFG, meta_out=_mem_meta,
+                                   cfg=_mem_cfg, meta_out=_mem_meta,
                                    workspace=ws_key, workspace_label=ws_label)
     if mem_block:
         base_system = base_system + "\n\n" + mem_block
@@ -2035,7 +2071,7 @@ async def chat(req: ChatRequest):
 
     agent_cfg = {
         **CFG.get("agent", {}),
-        "_memory": MEM_CFG,
+        "_memory": _mem_cfg,
         "_project_root": str(DATA_ROOT),
         "_permission": permission,
         "_workspace": ws_key,
@@ -2214,6 +2250,7 @@ async def chat(req: ChatRequest):
                                 tags="会话", importance=_imp, session_id=session_id,
                                 workspace=ws_key,
                                 dedup=False,   # 会话记忆都留痕，不查重
+                                kind="task", source_session=str(session_id or "")[:80],
                             )
                             ev["memory_saved"] = True
                         except Exception:
