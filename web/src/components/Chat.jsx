@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { ClawLogo, IconArrowDown, IconBrain, IconCheck, IconChevron, IconCopy, IconFolder, IconRefresh, IconTerminal, IconVolume, IconVolumeOff, toolIcon } from '../icons.jsx'
+import { IconArrowDown, IconBrain, IconCheck, IconChevron, IconCopy, IconFolder, IconRefresh, IconTerminal, IconVolume, IconVolumeOff, toolIcon } from '../icons.jsx'
+import { CrabMark } from '../ui/brand.jsx'
 import { MiniMarkdown } from '../md.jsx'
 import { roomOf } from '../office.js'
 
@@ -456,10 +457,10 @@ export function MessageList({ messages, compacted, streaming, onPickPrompt, onRe
           {messages.length === 0 ? (
             <div className="welcome">
               <div className="w-logo">
-                <ClawLogo size={92} twoTone />
+                <CrabMark size={82} />
               </div>
-              <div className="w-title">Claw Agent</div>
-              <div className="w-sub">Qoder 云端 · {hero?.toolCount ?? 11} 件工具 · 四层记忆 · 思考预算可控</div>
+              <div className="w-title">Claw Studio</div>
+              <div className="w-sub">本地优先 · {hero?.toolCount ?? 31} 件工具 · 四层记忆 · 操作可审批</div>
               {hero?.stats?.length ? (
                 <div className="w-stats">
                   {hero.stats.map((st) => (

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getExperts, getModels, getStatus, getQuotaProviders, streamChat, switchModel, getPendingAsk, answerAsk, skipAsk, getVoice, saveVoice, fetchTts, getApprovals, getPlan } from './api.js'
-import { ClawLogo, IconBrain, IconChat, IconChevron, IconEdit, IconFolder, IconGear, IconImage, IconMemory, IconPanelLeft, IconPlus, IconSearch, IconSend, IconSliders, IconStop, IconTrash, IconVolume, IconVolumeOff, IconX, toolIcon } from './icons.jsx'
+import { IconBrain, IconChat, IconChevron, IconEdit, IconFolder, IconGear, IconImage, IconMemory, IconPanelLeft, IconPlus, IconSearch, IconSend, IconSliders, IconStop, IconTrash, IconVolume, IconVolumeOff, IconX, toolIcon } from './icons.jsx'
 import { MessageList } from './components/Chat.jsx'
 import { AskCard } from './components/Chat.jsx'
 import { WorkdirPanel } from './components/WorkdirPanel.jsx'
@@ -8,6 +8,7 @@ import { OfficePanel } from './components/OfficePanel.jsx'
 import ApprovalCard from './components/ApprovalCard.jsx'
 import PlanPanel from './components/PlanPanel.jsx'
 import { findRoom } from './office.js'
+import { CrabMark } from './ui/brand.jsx'
 import { MemoryPanel, ModelMenu, ParamsPanel, PermMenu, SkillsPanel, ThinkMenu, THINK_LEVELS, effortOptions } from './components/Panels.jsx'
 import { EffortIgnition } from './effort-ignition.jsx'
 import { EffortDrawer, EffortTrigger } from './effort-drawer.jsx'
@@ -1614,8 +1615,8 @@ export default function App() {
       {/* 侧栏 */}
       <div className="sidebar">
         <div className="brand">
-          <span className="logo-glow"><ClawLogo size={21} twoTone /></span>
-          CLAW AGENT
+          <span className="logo-glow"><CrabMark size={22} /></span>
+          CLAW STUDIO
         </div>
         <button className="newchat-btn" onClick={createSession}>
           <IconPlus size={14} /> 新会话

@@ -2721,3 +2721,12 @@ body {
 .os-group-head:hover { background: #ffffff07; }
 .os-group.on .os-group-head { color: var(--text); background: #ffffff09; border-color: #ffffff12; }
 .os-group-count { margin-left: auto; font-family: var(--mono); font-size: 9.5px; opacity: 0.75; }
+
+/* 新组件（螃蟹标记、计划面板、审批卡片）使用语义变量；
+   旧样式表里叫 --violet，这里做一层别名，避免两套命名打架。 */
+:root {
+  --primary: var(--violet);
+  --primary-fg: #FFF8F2;
+  --surface-2: var(--bg-soft);
+  --border-strong: #CDBDA2;
+}
