@@ -88,7 +88,7 @@ export default function Splash({ variant = 'orbit', minDuration = 1600, onDone }
           />
         )}
         <div className="flex h-[64px] w-[64px] items-center justify-center">
-          <CrabMark size={58} withLegs />
+          <CrabMark size={64} />
         </div>
       </div>
 

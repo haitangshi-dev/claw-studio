@@ -146,7 +146,7 @@ export default function Settings({ onClose, onPreviewSplash }) {
     <div className="flex h-full min-h-0 bg-bg text-ink">
       <aside className="flex w-[212px] flex-none flex-col border-r border-line bg-surface2/50">
         <div className="flex items-center gap-2 px-4 pb-3 pt-4">
-          <CrabMark size={26} />
+          <CrabMark size={32} />
           <div>
             <p className="m-0 text-[13px] font-medium leading-tight">Claw Studio</p>
             <p className="m-0 text-[11px] leading-tight text-faint">设置</p>
