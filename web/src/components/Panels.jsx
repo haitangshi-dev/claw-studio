@@ -44,7 +44,7 @@ export function ModelMenu({ models, currentKey, disabled, onSwitch, thinkByModel
   }, [])
   const localModels = (models || []).filter((m) => !m.cloud)
   const cloudModels = (models || []).filter((m) => m.cloud)
-  // 云端按提供方分组：WorkBuddy / Qoder（顺序按出现先后）
+  // 云端按提供方分组：Qoder / API 供应商（顺序按出现先后）
   const cloudGroups = (() => {
     const by = {}
     const order = []
@@ -56,7 +56,8 @@ export function ModelMenu({ models, currentKey, disabled, onSwitch, thinkByModel
       }
       by[p].push(m)
     }
-    return order.map((p) => ({ provider: p, label: p === 'qoder' ? 'Qoder' : p, models: by[p] }))
+    const LABEL = { qoder: 'Qoder', api: 'API 供应商' }
+    return order.map((p) => ({ provider: p, label: LABEL[p] || p, models: by[p] }))
   })()
   const displayName = ((models || []).find((m) => m.key === currentKey) || {}).name || currentKey
   const pick = (m) => {
@@ -160,7 +161,7 @@ export function ModelMenu({ models, currentKey, disabled, onSwitch, thinkByModel
             </div>
           ))}
           <div className="mm-params" onClick={() => { onOpenParams && onOpenParams(); setOpen(false) }}>
-            <IconSliders size={13} /> 模型参数设置…
+            <IconSliders size={13} /> 采样与运行参数…
           </div>
           <div className="model-menu-hint">右键模型项可设置思考强度 · 云端模型走 Qoder 账号（官方 CLI）</div>
         </div>
@@ -933,8 +934,8 @@ export function ParamsPanel({ modelKey, params, onChange, onResetAll, onClose, o
     <div className="overlay" onClick={onClose}>
       <div className="panel" onClick={(e) => e.stopPropagation()}>
         <div className="p-head">
-          <span style={{ display: 'flex', color: 'var(--violet-2)' }}><IconGear size={17} /></span>
-          <span className="p-title">设置</span>
+          <span style={{ display: 'flex', color: 'var(--violet-2)' }}><IconSliders size={17} /></span>
+          <span className="p-title">采样与运行参数</span>
           <span className="spacer" />
           <button className="icon-btn ghost" title="全部恢复默认" onClick={onResetAll}>
             <IconRefresh size={15} />
@@ -944,6 +945,10 @@ export function ParamsPanel({ modelKey, params, onChange, onResetAll, onClose, o
           </button>
         </div>
         <div className="p-body">
+          <div className="param-note">
+            这里只管<b>当前模型</b>的采样与加载参数。供应商、权限、微信、通知、外观这些
+            <b>应用级设置</b>已经移到主窗口右上角齿轮里。
+          </div>
           <div className="param-note">额度管理 · 每接一家给一套独立的额度设置</div>
           {quotaProviders.length === 0 && (
             <div className="cred-box">
