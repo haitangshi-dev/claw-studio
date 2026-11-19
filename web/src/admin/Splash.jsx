@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { CrabMark } from '../ui/brand'
 
 const STEPS = [
   '加载运行时配置',
@@ -13,42 +14,6 @@ const VARIANTS = {
   pulse: { ring: 'pulse', speed: 1.2 },
   scan: { ring: 'scan', speed: 0.9 },
   minimal: { ring: 'none', speed: 0 },
-}
-
-export function ClawMark({ size = 34 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden="true">
-      <path
-        d="M20 32C17 26 15.2 18 14.6 11.8"
-        fill="none"
-        stroke="var(--primary)"
-        strokeWidth="3.2"
-        strokeLinecap="round"
-      />
-      <path
-        d="M20 32C20 25 20 16 20 8.2"
-        fill="none"
-        stroke="var(--primary)"
-        strokeWidth="3.2"
-        strokeLinecap="round"
-      />
-      <path
-        d="M20 32C23 26 24.8 18 25.4 11.8"
-        fill="none"
-        stroke="var(--primary)"
-        strokeWidth="3.2"
-        strokeLinecap="round"
-      />
-      <path
-        d="M14.8 32.6C18.2 34.6 21.8 34.6 25.2 32.6"
-        fill="none"
-        stroke="var(--primary)"
-        strokeWidth="2.6"
-        strokeLinecap="round"
-        opacity="0.4"
-      />
-    </svg>
-  )
 }
 
 export default function Splash({ variant = 'orbit', minDuration = 1600, onDone }) {
@@ -96,6 +61,7 @@ export default function Splash({ variant = 'orbit', minDuration = 1600, onDone }
             style={{ animation: `cs-spin ${1.6 / (conf.speed || 1)}s linear infinite` }}
             aria-hidden="true"
           >
+            <circle cx="46" cy="46" r="43" fill="none" stroke="var(--border)" strokeWidth="1" opacity="0.55" />
             <circle
               cx="46"
               cy="46"
@@ -121,8 +87,8 @@ export default function Splash({ variant = 'orbit', minDuration = 1600, onDone }
             style={{ animation: `cs-scan ${1.4 / (conf.speed || 1)}s ease-in-out infinite` }}
           />
         )}
-        <div className="flex h-[64px] w-[64px] items-center justify-center rounded-xl bg-primary-soft">
-          <ClawMark size={38} />
+        <div className="flex h-[64px] w-[64px] items-center justify-center">
+          <CrabMark size={58} withLegs />
         </div>
       </div>
 
