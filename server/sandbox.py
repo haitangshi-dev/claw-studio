@@ -17,7 +17,7 @@ import re
 import tempfile
 from pathlib import Path
 
-PERMISSIONS = ("readonly", "standard", "full")
+PERMISSIONS = ("readonly", "ask", "standard", "full")
 
 PERMISSION_LEVELS = [
     {
@@ -80,6 +80,8 @@ def normalize_permission(value: str | None) -> str:
     v = str(value or "standard").strip().lower()
     if v in ("readonly", "read-only", "read", "只读"):
         return "readonly"
+    if v in ("ask", "confirm", "询问", "逐次确认"):
+        return "ask"
     if v in ("full", "off", "none", "完全", "全权"):
         return "full"
     return "standard"

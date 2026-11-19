@@ -264,6 +264,7 @@ export function ThinkMenu({ value, disabled, onChange, options, title, onIgnite 
 // ---------- 权限档位（只读 / 标准 / 完全） ----------
 export const PERM_LEVELS = [
   { k: 'readonly', lab: '只读', desc: '不写文件；命令仅允许只读白名单' },
+  { k: 'ask', lab: '询问', desc: '任何有副作用的操作都先问你（默认）' },
   { k: 'standard', lab: '标准', desc: '沙箱：写入限工作目录，危险命令拦截（默认）' },
   { k: 'full', lab: '完全', desc: '无沙箱：全盘读写，危险命令放行，谨慎使用' },
 ]

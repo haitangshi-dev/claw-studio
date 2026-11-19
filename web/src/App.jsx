@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { getExperts, getModels, getStatus, getQuotaProviders, streamChat, switchModel, getPendingAsk, answerAsk, skipAsk, getVoice, saveVoice, fetchTts } from './api.js'
+import { getExperts, getModels, getStatus, getQuotaProviders, streamChat, switchModel, getPendingAsk, answerAsk, skipAsk, getVoice, saveVoice, fetchTts, getApprovals } from './api.js'
 import { ClawLogo, IconBrain, IconChat, IconChevron, IconEdit, IconFolder, IconGear, IconImage, IconMemory, IconPanelLeft, IconPlus, IconSearch, IconSend, IconSliders, IconStop, IconTrash, IconVolume, IconVolumeOff, IconX, toolIcon } from './icons.jsx'
 import { MessageList } from './components/Chat.jsx'
 import { AskCard } from './components/Chat.jsx'
 import { WorkdirPanel } from './components/WorkdirPanel.jsx'
 import { OfficePanel } from './components/OfficePanel.jsx'
+import ApprovalCard from './components/ApprovalCard.jsx'
 import { findRoom } from './office.js'
 import { MemoryPanel, ModelMenu, ParamsPanel, PermMenu, SkillsPanel, ThinkMenu, THINK_LEVELS, effortOptions } from './components/Panels.jsx'
 import { EffortIgnition } from './effort-ignition.jsx'
@@ -546,13 +547,13 @@ export default function App() {
     } catch (e) {
       /* 旧数据损坏则回落默认 */
     }
-    const legacy = localStorage.getItem('claw_permission') || 'standard'
+    const legacy = localStorage.getItem('claw_permission') || 'ask'
     return { onduty: legacy, unattended: legacy }
   })
   useEffect(() => {
     localStorage.setItem('claw_perm_by_mode', JSON.stringify(permByMode))
   }, [permByMode])
-  const permission = permByMode[agentMode] || 'standard'
+  const permission = permByMode[agentMode] || 'ask'
   const setPermission = (v) => setPermByMode((prev) => ({ ...prev, [agentMode]: v }))
   // 状态栏：模型当前在干什么
   const [activity, setActivity] = useState({ kind: 'idle', label: '就绪' })
@@ -589,6 +590,7 @@ export default function App() {
   }, [sideCollapsed])
   // 界面内提问卡片（ask_user）：后端有 pending 提问时浮出，用户点选后回传
   const [ask, setAsk] = useState(null)
+  const [approvals, setApprovals] = useState([])
   const askDismissedRef = useRef(new Set())
   useEffect(() => {
     let stop = false
@@ -610,6 +612,23 @@ export default function App() {
     const t = setInterval(tick, 1200)
     return () => { stop = true; clearInterval(t) }
   }, [])
+  useEffect(() => {
+    let stop = false
+    const tick = async () => {
+      if (document.hidden) return
+      try {
+        const d = await getApprovals()
+        if (stop) return
+        setApprovals((d && d.ok && Array.isArray(d.items) ? d.items : []))
+      } catch (e) {
+        /* 离线忽略 */
+      }
+    }
+    tick()
+    const t = setInterval(tick, 900)
+    return () => { stop = true; clearInterval(t) }
+  }, [])
+
   const answerAskCard = async (val) => {
     const cur = ask
     if (!cur) return
@@ -1939,6 +1958,13 @@ export default function App() {
           busy={busy}
           onSpeak={speak}
           speakingId={speakingId}
+        />
+      )}
+      {approvals.length > 0 && (
+        <ApprovalCard
+          item={approvals[0]}
+          extra={approvals.length - 1}
+          onDone={(id) => setApprovals((prev) => prev.filter((x) => x.id !== id))}
         />
       )}
       {toast && (

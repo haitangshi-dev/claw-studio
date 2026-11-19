@@ -261,6 +261,19 @@ def execute_tool(name: str, args: dict, workdir: str, cfg: dict) -> tuple[str, b
         _audit(name, args, False, len(sandbox_msg), workdir, cfg, error=sandbox_msg)
         return sandbox_msg, False
 
+    # 审批闸门：有副作用的操作，在用户点头之前不落地（full 档直接放行）
+    try:
+        import approval as _approval
+
+        _allowed, _why = _approval.check(name, args, workdir, cfg)
+    except Exception as e:  # 闸门自身出问题不能把工具链整个卡死，但要留痕
+        print(f"[approval] 检查失败，放行：{type(e).__name__}: {e}", flush=True)
+        _allowed, _why = True, ""
+    if not _allowed:
+        msg = f"[审批] 未执行：{_why}。请换一种做法，或先向用户说明再重试。"
+        _audit(name, args, False, len(msg), workdir, cfg, error=_why)
+        return msg, False
+
     handler = _HANDLERS.get(name)
     if handler is None:
         return f"错误：未知工具 {name}（可用：{', '.join(_HANDLERS)}）", False

@@ -395,3 +395,23 @@ export async function fetchTts(text, { voice, rate, volume } = {}) {
   }
   return r.blob()
 }
+
+// ---------- 工具审批闸门 ----------
+export async function getApprovals() {
+  try {
+    const r = await fetch('/api/approval/pending')
+    if (!r.ok) return { ok: false, items: [] }
+    return await r.json()
+  } catch (e) {
+    return { ok: false, items: [] }
+  }
+}
+
+export async function answerApproval(id, action, reason = '') {
+  const r = await fetch('/api/approval/answer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, action, reason }),
+  })
+  return r.json()
+}

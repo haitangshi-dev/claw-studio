@@ -389,7 +389,9 @@ class QoderProvider:
         elif permission == "full":
             argv += ["--permission-mode", "bypass_permissions"]
         else:
-            argv += ["--permission-mode", "accept_edits"]
+            # ask / standard：只放开只读内置工具，写操作必须走 Claw 的 MCP 工具，
+            # 这样审批闸门才是唯一入口（CLI 自己的 Write/Bash 会绕过闸门）。
+            argv += ["--tools"] + _READONLY_TOOLS + ["--permission-mode", "accept_edits"]
         if cwd:
             argv += ["-w", cwd]
 

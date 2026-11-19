@@ -374,6 +374,11 @@ import settings_api as _settings_api  # noqa: E402
 _settings_api.configure(DATA_ROOT, CONFIG_PATH, CFG)
 app.include_router(_settings_api.router)
 
+import approval as _approval  # noqa: E402
+
+_approval.configure(_settings_api.load_settings)
+app.include_router(_approval.router)
+
 
 def sse(obj: dict) -> str:
     return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
