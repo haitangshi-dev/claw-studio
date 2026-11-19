@@ -641,6 +641,7 @@ export default function App() {
     }
   }
   const abortRef = useRef(null)
+  const streamSidRef = useRef(null)   // 这一轮流式属于哪个会话（切走后 stop 也要停对）
   // 用户是否手动按了「停止」：用来区分「手动停」与「因阀门暂停」（后者要续跑）
   const userStoppedRef = useRef(false)
   // 会话状态最新镜像：异步续跑时要拿到最新消息当压缩原料
@@ -879,6 +880,14 @@ export default function App() {
       const seen = new Set()
       for (const s of sessions) {
         seen.add(s.id)
+        // 空会话不写盘：新建后什么都没说就切走/关掉，不该在 sessions/ 里留一个空壳
+        if (!s.messages || s.messages.length === 0) {
+          if (saved.has(s.id)) {
+            saved.delete(s.id)
+            apiSessionDelete(s.id)
+          }
+          continue
+        }
         let json = ''
         try {
           json = JSON.stringify(slimSession(s))
@@ -1175,6 +1184,7 @@ export default function App() {
     // 允许的暂停次数（默认 2 次；压缩无进展时清零，防止来回转圈）
     const pauseLeft = opts.pauseLeft != null ? opts.pauseLeft : 2
 
+    streamSidRef.current = sid
     abortRef.current = streamChat(
       {
         messages: history,
@@ -1306,7 +1316,7 @@ export default function App() {
     if (!abortRef.current) return
     abortRef.current()
     abortRef.current = null
-    const sid = session.id
+    const sid = streamSidRef.current || session.id
     setSessions((prev) =>
       prev.map((s) =>
         s.id !== sid

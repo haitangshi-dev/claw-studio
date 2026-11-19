@@ -59,6 +59,10 @@ class SessionStore:
         if not isinstance(s, dict):
             raise ValueError("session 必须是对象")
         p = self._path(s.get("id"))
+        # 空会话不落盘：全新会话在用户说话之前不该在磁盘上留文件；
+        # 已经存在的会话（比如把消息删空了）仍然写，免得静默丢数据。
+        if not (s.get("messages") or []) and not p.exists():
+            return False
         s = {**s, "messages": list(s["messages"]) if isinstance(s.get("messages"), list) else []}
         s.pop("_pending_team_ids", None)
         now = int(time.time() * 1000)

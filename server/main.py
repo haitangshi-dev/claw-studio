@@ -1425,7 +1425,12 @@ def _wechat_bridge_root() -> Path | None:
     _w = str((CFG.get("wechat") or {}).get("bridge_dir") or "").strip()
     if _w:
         cands.append(Path(_w))
+    # 仓库内的 bridge/ 是主位置；workspace/ 与安装目录是历史遗留，保留兜底
+    cands.append(DATA_ROOT / "bridge")
     cands.append(DATA_ROOT / "workspace" / "wechat-bridge")
+    _local = os.environ.get("LOCALAPPDATA")
+    if _local:
+        cands.append(Path(_local) / "Programs" / "ClawAgent" / "workspace" / "wechat-bridge")
     for c in cands:
         try:
             if (c / "secure" / "binding.json").is_file():
