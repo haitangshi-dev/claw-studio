@@ -1,8 +1,0 @@
-{
-  "name": "notify_report",
-  "version": "1.0",
-  "description": "向用户邮箱/微信/QQ 发进度汇报（走 notify 技能，自动定位 Python 解释器，不受打包版 sys.executable 影响）",
-  "readonly_safe": false,
-  "enabled": true,
-  "created_at": "2026-10-08 00:19:53"
-}
