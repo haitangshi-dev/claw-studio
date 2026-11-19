@@ -462,6 +462,22 @@ class MemoryStore:
         self.export_markdown()
         return n > 0
 
+    def purge_all(self) -> int:
+        """清空全部记忆（不可逆；调用方应先自己备份）。
+
+        与 forget_many(layer=None) 的区别：那个在没给 layer/query 时会拒绝，
+        这里明确就是「全删」，不给人误用的机会。
+        """
+        try:
+            rows = self._rows("SELECT id FROM entries WHERE status='active'", ())
+            ids = [int(r["id"]) for r in rows]
+            for i in ids:
+                self._exec("DELETE FROM entries WHERE id=?", (i,))
+            self.export_markdown()
+            return len(ids)
+        except Exception:
+            return 0
+
     def forget_many(self, *, ids: list[int] | None = None, layer: int | None = None,
                     query: str | None = None) -> int:
         """批量删除：按 ids / 整层 / 关键词（标题+标签+内容 LIKE）。返回删除条数。"""

@@ -1812,8 +1812,42 @@ def memory_demote_api(req: DemoteRequest):
 
 @app.post("/api/memory/export")
 def memory_export():
+    """导出全部记忆为 Markdown 备份，返回文件路径。"""
     STORE.export_markdown()
-    return {"ok": True}
+    try:
+        out_dir = DATA_ROOT / "memory" / "export"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        files = sorted(out_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+        return {"ok": True, "path": str(files[0]) if files else "",
+                "dir": str(out_dir)}
+    except Exception as e:
+        return {"ok": True, "path": "", "error": f"{type(e).__name__}: {e}"[:200]}
+
+
+@app.post("/api/memory/purge")
+def memory_purge(payload: dict | None = None):
+    """清空记忆库。
+
+    这是不可逆操作，所以强制先导出一份备份再删；返回备份路径，出问题能手工还原。
+    单独一个接口（而不是复用 DELETE /api/memory?layer=）是为了让界面上能明确提示这件事。
+    """
+    try:
+        STORE.export_markdown()
+        backup = ""
+        out_dir = DATA_ROOT / "memory" / "export"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        db = DATA_ROOT / "memory" / "memory.db"
+        if db.exists():
+            backup = str(out_dir / f"memory-purge-{stamp}.db")
+            shutil.copy2(str(db), backup)
+        before = STORE.stats().get("total", 0)
+        n = STORE.purge_all()
+        after = STORE.stats().get("total", 0)
+        return {"ok": True, "deleted": n, "before": before, "after": after,
+                "backup": backup}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
 
 
 @app.delete("/api/memory/{entry_id}")

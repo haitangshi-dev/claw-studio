@@ -19,7 +19,8 @@ import { CrabMark } from '../ui/brand'
 import Appearance from './panes/Appearance'
 import Providers from './panes/Providers'
 import Permission from './panes/Permission'
-import { AboutPane, AutomationPane, MemoryPane, NotifyPane, WeChatPane } from './panes/Misc'
+import { AboutPane, AutomationPane, NotifyPane, WeChatPane } from './panes/Misc'
+import MemoryPane from './panes/Memory'
 import Logs from './panes/Logs'
 
 function GeneralPane({ settings, set }) {
