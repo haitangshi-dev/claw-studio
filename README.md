@@ -76,6 +76,28 @@ python scripts/check_publish.py
 > 注意：如果敏感内容**已经 push 过**，删文件不够——历史里仍然能翻到，需要 `git filter-repo` 重写历史，
 > 并立刻吊销对应凭证。
 
+## 打一个能发出去的包
+
+```bash
+python scripts/pack_release.py
+```
+
+产出 `dist-release/claw-studio-<日期>.zip`，**只含源码与配置模板**：
+
+| 不会进包 | 原因 |
+|---|---|
+| `memory/` `sessions/` | 是你的记忆和聊天记录 |
+| `data/` | 含加密后的 API Key、设置 |
+| `logs/` `workspace/` | 诊断日志、工具的产物 |
+| `bridge/{state,secure,inbox,outbox}` | 微信登录凭证与消息 |
+| `config/config.json` | 本地配置（个人路径、模型选择），只发 `config.example.json` |
+| `node_modules/` `web/dist/` | 依赖与构建产物，对方自己装 |
+
+脚本打包完会**自己解压检查一遍**，发现任何运行期数据就报错退出（退出码 1），
+不会让你带着自己的数据发出去。
+
+> 别人拿到包后第一次启动是**空记忆、空会话**，`config/config.json` 会自动从模板生成。
+
 ## 许可
 
 MIT

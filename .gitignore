@@ -51,3 +51,6 @@ bridge/outbox/
 bridge/logs/
 bridge/qr/
 bridge/__pycache__/
+
+# 分发包产物
+dist-release/
