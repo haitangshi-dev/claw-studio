@@ -44,6 +44,8 @@ PATTERNS = [
 # 允许出现的邮箱（示例/协议地址）
 EMAIL_ALLOW = re.compile(r"(@example\.(com|org)|@users\.noreply\.github\.com|dev@claw\.studio)$")
 
+SKIP_FILES = {"scripts/check_publish.py"}  # 脚本自己的正则不该被自己举报
+
 SKIP_SUFFIX = (".png", ".jpg", ".jpeg", ".ico", ".woff", ".woff2", ".ttf", ".lock")
 
 
@@ -56,6 +58,8 @@ def main() -> int:
     problems: list[tuple[str, str, str]] = []
 
     for rel in tracked_files():
+        if rel in SKIP_FILES:
+            continue
         for pat in FORBIDDEN_PATHS:
             if re.search(pat, rel, re.I):
                 problems.append((rel, "不该入库的路径", pat))
@@ -70,6 +74,8 @@ def main() -> int:
         for name, rx in PATTERNS:
             for m in rx.finditer(text):
                 hit = m.group(0)
+                if "..." in hit or "…" in hit:   # 文档里的省略号示例，不是真路径
+                    continue
                 if name == "邮箱" and EMAIL_ALLOW.search(hit):
                     continue
                 if name == "Windows 用户目录" and "claw-studio" in hit:

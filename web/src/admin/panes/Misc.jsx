@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Brain, CalendarClock, GitBranch, MessageCircle, Plus, ScrollText } from 'lucide-react'
 import {
   Badge,
@@ -11,7 +11,17 @@ import {
   Select,
   Slider,
   Toggle,
+  StatusDot,
+  Spinner,
 } from '../../ui'
+import {
+  getWechat,
+  startWechat,
+  stopWechat,
+  getWechatMessages,
+  sendWechatMessage,
+  wechatLogin,
+} from '../../api'
 
 export function MemoryPane({ settings, set }) {
   const m = settings.memory
@@ -119,57 +129,242 @@ export function NotifyPane({ settings, set }) {
 }
 
 export function WeChatPane({ settings, set }) {
-  const w = settings.wechat
+  const [st, setSt] = useState(null)
+  const [items, setItems] = useState([])
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState('')
+  const [note, setNote] = useState('')
+  const [qrTick, setQrTick] = useState(Date.now())
+  const [showQr, setShowQr] = useState(false)
+  const boxRef = useRef(null)
+
+  const loadStatus = () =>
+    getWechat()
+      .then((d) => setSt(d))
+      .catch(() => setSt(null))
+  const loadMsgs = () =>
+    getWechatMessages(80)
+      .then((d) => setItems((d && d.items) || []))
+      .catch(() => setItems([]))
+
+  useEffect(() => {
+    loadStatus()
+    loadMsgs()
+    const t1 = setInterval(loadStatus, 4000)
+    const t2 = setInterval(loadMsgs, 3000)
+    return () => {
+      clearInterval(t1)
+      clearInterval(t2)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight
+  }, [items.length])
+
+  const doLogin = async () => {
+    setBusy('login')
+    const d = await wechatLogin().catch(() => ({ ok: false, error: '请求失败' }))
+    setBusy('')
+    setNote(d.ok ? '已拉起扫码窗口，用微信扫下面的码' : d.error || '启动失败')
+    if (d.ok) {
+      setShowQr(true)
+      setQrTick(Date.now())
+      ;[2000, 5000, 9000, 14000].forEach((ms) =>
+        setTimeout(() => {
+          setQrTick(Date.now())
+          loadStatus()
+        }, ms),
+      )
+    }
+  }
+
+  const toggleRun = async () => {
+    setBusy('run')
+    const d = st && st.running ? await stopWechat().catch(() => ({})) : await startWechat().catch(() => ({}))
+    setBusy('')
+    if (d && d.error) setNote(d.error)
+    else if (d && d.message) setNote(d.message)
+    loadStatus()
+  }
+
+  const sendMsg = async () => {
+    const text = draft.trim()
+    if (!text) return
+    setBusy('send')
+    const d = await sendWechatMessage(text).catch(() => ({ ok: false, error: '请求失败' }))
+    setBusy('')
+    if (d.ok) {
+      setDraft('')
+      setNote('已投递到发件队列')
+      loadMsgs()
+    } else setNote(d.error || '发送失败')
+  }
+
+  const pending = items.filter((i) => i.dir === 'out' && i.state === 'pending')
+  const expired = items.filter((i) => i.dir === 'out' && i.state === 'expired')
+
   return (
     <>
       <Section
         title="微信通道"
-        desc="内置的对话入口：在微信里给机器人发消息，它就是同一个 Agent、同一份记忆。"
-        action={<Badge tone="warning">未绑定</Badge>}
+        desc="在微信里给机器人发消息，用的是同一个 Agent、同一份记忆。收到与回复都在本机完成。"
+        action={<Badge tone={st?.running ? 'success' : 'neutral'}>{st?.running ? '运行中' : '未运行'}</Badge>}
       >
         <Card>
-          <Row label="启用微信通道" hint="启用后桥接进程随应用启动，收消息、回消息都在本机完成">
-            <Toggle checked={w.enabled} onChange={(v) => set('wechat.enabled', v)} />
+          <Row
+            label={
+              <span className="flex items-center gap-2">
+                <StatusDot tone={st?.running ? 'success' : 'neutral'} pulse={!!st?.running} />
+                桥接进程
+              </span>
+            }
+            hint={st?.error ? st.error : st?.running ? '收消息、发消息都在本机，不走第三方服务器' : '未启动时不收消息'}
+          >
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="ghost" onClick={doLogin} disabled={busy === 'login'}>
+                扫码绑定
+              </Button>
+              <Button size="sm" onClick={toggleRun} disabled={busy === 'run'}>
+                {busy === 'run' ? <Spinner size={12} /> : null}
+                {st?.running ? '停止' : '启动'}
+              </Button>
+            </div>
           </Row>
-          <Row label="绑定状态" hint="扫码登录后显示绑定的微信账号，凭证加密存在本机">
-            <Button size="sm">扫码绑定</Button>
+          <Row
+            label="绑定账号"
+            hint={
+              st?.logged_in
+                ? `已登录${st?.bound_user ? ` · ${String(st.bound_user).slice(0, 14)}…` : ''}`
+                : '还没有绑定：点「扫码绑定」用微信扫一次，凭证加密存在本机'
+            }
+          >
+            <Badge tone={st?.logged_in ? 'success' : 'warning'}>{st?.logged_in ? '已绑定' : '未绑定'}</Badge>
           </Row>
-          <Row label="回复风格" hint="微信不渲染 Markdown，回复会自动压成纯文本并限制长度">
-            <Select className="w-[150px]" value={w.style || 'plain'} onChange={(e) => set('wechat.style', e.target.value)}>
-              <option value="plain">纯文本</option>
-              <option value="brief">精简成三句</option>
-            </Select>
+          <Row label="发件队列" hint="窗口过期会被微信打回（错误 -2），这些不再无限重试，超 24 小时自动归档">
+            <span className="font-mono text-[11.5px] text-faint">
+              待发 {pending.length} · 已过期 {expired.length}
+            </span>
           </Row>
         </Card>
+
+        {showQr && (
+          <Card className="mt-3 p-4">
+            <div className="flex items-start gap-4">
+              <img
+                src={`/api/wechat/qr?t=${qrTick}`}
+                alt="微信登录二维码"
+                style={{ width: 132, height: 132, borderRadius: 8, border: '1px solid var(--border)' }}
+                onError={(e) => {
+                  e.currentTarget.style.opacity = 0.25
+                }}
+              />
+              <div className="min-w-0">
+                <p className="m-0 text-[13px]">用微信扫这个码</p>
+                <p className="m-0 mt-1.5 text-[12px] leading-relaxed text-faint">
+                  扫码后这个窗口不用管，登录成功会自动写入本机凭证。二维码 5 分钟内有效，过期再点一次「扫码绑定」。
+                </p>
+                <Button size="sm" variant="ghost" className="mt-2" onClick={() => setShowQr(false)}>
+                  收起
+                </Button>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {note && (
+          <p className="m-0 mt-2 text-[11.5px]" style={{ color: 'var(--text-faint)' }}>
+            {note}
+          </p>
+        )}
       </Section>
 
-      <Section
-        title="排队与补发"
-        desc="官方通道只能在会话窗口内回复。窗口过期时不硬发、不丢消息，排队等你下次说话时合并补发。"
-      >
-        <Card>
-          <Row label="无窗口时排队" hint="最多保留最近 20 条，超出的按任务合并成一条摘要">
-            <Badge tone="success">已启用</Badge>
-          </Row>
-          <Row label="补发策略" hint="用户下次发消息时，先补一条「你不在时完成了这些事」">
-            <Segmented
-              size="sm"
-              value={w.replay || 'digest'}
-              onChange={(v) => set('wechat.replay', v)}
-              options={[
-                { value: 'each', label: '逐条补' },
-                { value: 'digest', label: '合并摘要' },
-                { value: 'drop', label: '不补' },
-              ]}
+      <Section title="消息" desc="这里看到的就是桥接目录里真实收发的消息，不是模拟数据。">
+        <Card className="p-0">
+          <div ref={boxRef} style={{ maxHeight: 320, overflowY: 'auto', padding: '12px 14px' }}>
+            {items.length === 0 && (
+              <p className="m-0 py-6 text-center text-[12px] text-faint">
+                还没有消息。绑定后在微信里给机器人发一条，这里就会出现。
+              </p>
+            )}
+            {items.map((m) => {
+              const mine = m.dir === 'out'
+              return (
+                <div key={m.id} style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom: 8 }}>
+                  <div style={{ maxWidth: '78%' }}>
+                    <div
+                      style={{
+                        padding: '7px 10px',
+                        borderRadius: 10,
+                        fontSize: 12.5,
+                        lineHeight: 1.55,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                        background: mine ? 'var(--primary)' : 'var(--surface2)',
+                        color: mine ? 'var(--primary-fg)' : 'var(--text)',
+                        opacity: m.state === 'expired' ? 0.55 : 1,
+                      }}
+                    >
+                      {m.text}
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 2,
+                        fontSize: 10.5,
+                        color: 'var(--text-faint)',
+                        textAlign: mine ? 'right' : 'left',
+                      }}
+                    >
+                      {fmtTime(m.at)}
+                      {mine && m.state === 'pending' ? ' · 待发' : ''}
+                      {mine && m.state === 'expired' ? ' · 已过期' : ''}
+                      {mine && m.state === 'sent' ? ' · 已送达' : ''}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, padding: '10px 12px', borderTop: '1px solid var(--border)' }}>
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  sendMsg()
+                }
+              }}
+              placeholder="发一条微信消息（需要 6 天内有会话窗口）"
+              style={{
+                flex: 1,
+                height: 32,
+                padding: '0 10px',
+                fontSize: 12.5,
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                background: 'var(--bg)',
+                color: 'var(--text)',
+              }}
             />
-          </Row>
-          <Row label="接收图片与文件" hint="收到的图片会走视觉模型理解，文件暂存到工作目录">
-            <Toggle checked={w.media || false} onChange={(v) => set('wechat.media', v)} />
-          </Row>
+            <Button size="sm" variant="primary" onClick={sendMsg} disabled={busy === 'send' || !draft.trim()}>
+              发送
+            </Button>
+          </div>
         </Card>
       </Section>
     </>
   )
+}
+
+function fmtTime(ms) {
+  if (!ms) return ''
+  const d = new Date(ms)
+  const now = new Date()
+  const same = d.toDateString() === now.toDateString()
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return same ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`
 }
 
 export function AutomationPane({ settings, set }) {

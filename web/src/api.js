@@ -435,3 +435,27 @@ export async function postPlan(body) {
   })
   return r.json()
 }
+
+// ---- 微信界面 ----
+export async function getWechatMessages(limit = 60) {
+  try {
+    const r = await fetch(`/api/wechat/messages?limit=${limit}`)
+    return r.ok ? await r.json() : { ok: false, items: [] }
+  } catch (e) {
+    return { ok: false, items: [] }
+  }
+}
+
+export async function sendWechatMessage(text) {
+  const r = await fetch('/api/wechat/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+  return r.json()
+}
+
+export async function wechatLogin() {
+  const r = await fetch('/api/wechat/login', { method: 'POST' })
+  return r.json()
+}

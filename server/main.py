@@ -384,6 +384,11 @@ import plan as PLAN  # noqa: E402
 PLAN.configure(DATA_ROOT)
 app.include_router(PLAN.router)
 
+import wechat_api as _wechat_api  # noqa: E402
+
+_wechat_api.configure(DATA_ROOT, CFG)
+app.include_router(_wechat_api.router)
+
 
 def _memory_budget(model_key: str = "", is_qoder: bool = False) -> int:
     """L1 常驻预算 = 模型上下文 × 设置里的比例，夹在 1200–8000 字。
