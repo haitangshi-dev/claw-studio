@@ -38,7 +38,7 @@ MEMORY_SPECS = [
         "type": "function",
         "function": {
             "name": "memory_search",
-            "description": "回忆用户的个人偏好、历史项目与过往保存的知识时使用；按关键词跨层搜索，或指定 layer 查看某一层。"
+            "description": "回忆用户偏好、历史项目与过往保存的知识时使用；按关键词跨层搜索，或指定 layer 查看某一层。"
                            "也可以用 tag 按标签选一批记忆（只给 tag 不给 query 就是「列出这个标签下的全部记忆」，"
                            "标签数量不限、支持 # 前缀与子串匹配）——同一主题的旧记录没记在标题里时，用标签找比用词猜更准。"
                            "query 请使用中文关键词（记忆库以中文存储）。"
@@ -540,7 +540,7 @@ def memory_search(args: dict, workdir: str, cfg: dict) -> str:
         l1 = store.get_layer(1, limit=5, scopes=scopes)
         what = " 与 ".join(x for x in (f'「{query}」' if query else "", f'标签「{tag}」' if tag else "") if x)
         hint = f"记忆库中没有匹配{what}的词条（检索范围：{_scope_desc(cfg, args.get('scope'))}）。"
-        hint += "注意：核心记忆（用户个人资料、偏好等）已直接包含在你的系统提示中，请先参考那里；"
+        hint += "注意：核心记忆（用户资料、偏好等）已直接包含在你的系统提示中，请先参考那里；"
         hint += "如需再查请换用中文关键词，或用 tag 按标签找（action=overview 可先看有哪些标签）。"
         if tag:
             try:
