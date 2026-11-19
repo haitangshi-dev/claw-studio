@@ -4,10 +4,8 @@ import { IconBrain, IconChat, IconChevron, IconEdit, IconFolder, IconGear, IconI
 import { MessageList } from './components/Chat.jsx'
 import { AskCard } from './components/Chat.jsx'
 import { WorkdirPanel } from './components/WorkdirPanel.jsx'
-import { OfficePanel } from './components/OfficePanel.jsx'
 import ApprovalCard from './components/ApprovalCard.jsx'
 import PlanPanel from './components/PlanPanel.jsx'
-import { findRoom } from './office.js'
 import { CrabMark } from './ui/brand.jsx'
 import { MemoryPanel, ModelMenu, ParamsPanel, PermMenu, SkillsPanel, ThinkMenu, THINK_LEVELS, effortOptions } from './components/Panels.jsx'
 import { EffortIgnition } from './effort-ignition.jsx'
@@ -20,7 +18,6 @@ const genId = () => `m${Date.now()}_${uid++}`
 const isCloudKey = (k) => String(k || '').startsWith('qoder:')
 
 const TOOL_LABELS = {
-  office_dispatch: '办公室 · 派活', office_hire: '办公室 · 招人', office_roster: '办公室 · 编制',
   run_shell: '执行命令', shell_jobs: '后台任务',
   file_read: '读文件', file_create: '新建文件', file_edit: '改文件', file_delete: '删文件', file_move: '移动文件', file_copy: '复制文件', file_search: '找文件',
   memory_search: '查记忆', memory_write: '写记忆', memory_get: '取记忆', memory_forget: '忘掉记忆', memory_pin: '固定记忆', memory_stats: '记忆统计', memory_tags: '记忆标签',
@@ -462,7 +459,6 @@ export default function App() {
   }, [effortOpen])
   const [showMemory, setShowMemory] = useState(false)
   const [showSkills, setShowSkills] = useState(false)
-  const [showOffice, setShowOffice] = useState(false)
   const [quotaProviders, setQuotaProviders] = useState([]) // 额度提供方列表（接一家多一套额度设置）
   const [draft, setDraft] = useState('')
   // 工作目录随会话保存；未绑定时用后端默认目录
@@ -513,34 +509,6 @@ export default function App() {
         s.id === activeId ? { ...s, unattendedMinutes: Number(n), updatedAt: Date.now() } : s
       )
     )
-  // 当前会话的办公室房间（主聊天即群聊，只切成员/房间）
-  const officeRoom = findRoom(modeSession.office && modeSession.office.roomId)
-  const setOfficeRoom = (roomId) => {
-    const room = findRoom(roomId)
-    setSessions((prev) =>
-      prev.map((s) => {
-        if (s.id !== activeId) return s
-        if ((s.office && s.office.roomId) === room.id) return s
-        const note = {
-          id: genId(),
-          role: 'assistant',
-          sender: { name: room.name, role: '框架', color: room.color, room: room.name, room_id: room.id },
-          content: `办公室已切换到「${room.name}」：${room.staff.join('、')}。本会话继续在同一条聊天流里。`,
-          done: true,
-          team: true,
-          team_id: room.id,
-          at: Date.now() / 1000,
-        }
-        return {
-          ...s,
-          office: { ...(s.office || {}), roomId: room.id },
-          messages: [...s.messages, note],
-          updatedAt: Date.now(),
-        }
-      })
-    )
-  }
-
   // 工具权限档位：两种模式各自独立保存（值守中用的是专用值守权限）
   const [permByMode, setPermByMode] = useState(() => {
     try {
@@ -1221,7 +1189,6 @@ export default function App() {
         permission,
         mode: agentMode,
         workdir,
-        office_room: officeRoom.id,
         unattended: unattended || undefined,
         unattended_minutes: unattended ? unattendedMinutes : undefined,
         images: !resume && pendingImages.length ? pendingImages : undefined,
@@ -1393,7 +1360,6 @@ export default function App() {
     const s = newSession(workdir, {
       agentMode,
       unattendedMinutes,
-      office: (session && session.office) || { roomId: 'dev' },
     })
     setSessions((prev) => [s, ...prev])
     setActiveId(s.id)
@@ -1660,15 +1626,6 @@ export default function App() {
           </button>
           <button className="footer-btn" onClick={() => setShowSkills(true)}>
             <IconBrain size={15} /> 技能库
-          </button>
-          <button className="footer-btn" onClick={() => setShowOffice(true)}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-              <rect x="3.5" y="4" width="7" height="7" rx="1.4" />
-              <rect x="13.5" y="4" width="7" height="7" rx="1.4" />
-              <rect x="3.5" y="13.5" width="7" height="6.5" rx="1.4" />
-              <rect x="13.5" y="13.5" width="7" height="6.5" rx="1.4" />
-            </svg>
-            办公室
           </button>
         </div>
       </div>
@@ -1981,19 +1938,6 @@ export default function App() {
         />
       )}
       {showSkills && <SkillsPanel onClose={() => setShowSkills(false)} />}
-      {showOffice && (
-        <OfficePanel
-          currentRoomId={officeRoom.id}
-          onChangeRoom={setOfficeRoom}
-          onClose={() => setShowOffice(false)}
-          session={session}
-          workdir={workdir}
-          qoderQuota={quotaProviders.find((p) => p.id === 'qoder')?.quota}
-          busy={busy}
-          onSpeak={speak}
-          speakingId={speakingId}
-        />
-      )}
       {approvals.length > 0 && (
         <ApprovalCard
           item={approvals[0]}

@@ -53,7 +53,6 @@ from .plugin_tools import (
     plugin_delete,
 )
 from .update_tool import UPDATE_SPECS, framework_update
-from .office_tools import OFFICE_SPECS, office_dispatch, office_hire, office_roster, office_talk
 from plan import SPEC as PLAN_SPEC, handler as plan_handler
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -100,10 +99,6 @@ _HANDLERS = {
     "plugin_toggle": plugin_toggle,
     "plugin_delete": plugin_delete,
     "framework_update": framework_update,
-    "office_dispatch": office_dispatch,
-    "office_hire": office_hire,
-    "office_talk": office_talk,
-    "office_roster": office_roster,
 }
 
 

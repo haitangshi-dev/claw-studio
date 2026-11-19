@@ -2,10 +2,8 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { IconArrowDown, IconBrain, IconCheck, IconChevron, IconCopy, IconFolder, IconRefresh, IconTerminal, IconVolume, IconVolumeOff, toolIcon } from '../icons.jsx'
 import { CrabMark } from '../ui/brand.jsx'
 import { MiniMarkdown } from '../md.jsx'
-import { roomOf } from '../office.js'
 
 const TOOL_LABELS = {
-  office_dispatch: '办公室 · 派活', office_hire: '办公室 · 招人', office_roster: '办公室 · 编制',
   run_shell: '执行命令', shell_jobs: '后台任务',
   file_read: '读文件', file_create: '新建文件', file_edit: '改文件', file_delete: '删文件', file_move: '移动文件', file_copy: '复制文件', file_search: '找文件',
   memory_search: '查记忆', memory_write: '写记忆', memory_get: '取记忆', memory_forget: '忘掉记忆', memory_pin: '固定记忆', memory_stats: '记忆统计', memory_tags: '记忆标签',
@@ -209,7 +207,7 @@ export function MessageView({ msg, streaming, isLast, onRegenerate, onEdit, onSp
     const kind = isSup ? 'supervisor' : isFw ? 'framework' : 'employee'
     const kindLabel = isSup ? '主管' : isFw ? '框架' : '员工'
     // 群聊标识：优先用后端随消息下发的部门，其次按 team_id 反查（历史消息没有 room 字段）
-    const room = roomOf(s.room_id) || roomOf(s.room) || roomOf(msg.team_id)
+    const room = null   // 办公室功能已移除；历史群聊消息仍按 sender 字段渲染
     const roomName = s.room || (room ? room.name : '')
     const roomColor = room?.color || s.color || '#D9713A'
     const when = msg.at

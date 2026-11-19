@@ -34,13 +34,13 @@ EXTERNAL = "external"
 _READ_TOOLS = {
     "file_read", "file_search", "memory_search", "memory_get", "memory_stats",
     "memory_forget_candidates", "skill_list", "skill_read", "plugin_list",
-    "shell_jobs", "office_roster",
+    "shell_jobs",
 }
 _DESTRUCTIVE_TOOLS = {
     "file_delete", "memory_forget", "memory_demote", "skill_delete", "plugin_delete",
     "framework_update",
 }
-_EXTERNAL_TOOLS = {"http_request", "office_dispatch", "office_hire", "office_talk", "memory_export"}
+_EXTERNAL_TOOLS = {"http_request", "memory_export"}
 _EXEC_TOOLS = {"run_shell", "skill_run", "plugin_create", "plugin_reload", "plugin_toggle", "skill_create"}
 
 _BROWSER_READ = {

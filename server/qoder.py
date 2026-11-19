@@ -316,13 +316,12 @@ class QoderProvider:
 
     # ---------- MCP 桥接配置（内联 JSON 传给 CLI 的 --mcp-config） ----------
     def _mcp_config(self, cwd: str, permission: str, unattended: bool = False,
-                    claw_session: str = "default", office_room: str = "") -> str:
+                    claw_session: str = "default") -> str:
         url = (
             f"http://127.0.0.1:{self.mcp_port}/internal/mcp"
             f"?token={quote(self.mcp_token)}&cwd={quote(str(cwd))}&permission={quote(permission or 'standard')}"
             f"&unattended={1 if unattended else 0}"
             f"&session={quote(str(claw_session or 'default'))}"
-            f"&office_room={quote(str(office_room or 'dev'))}"
         )
         return json.dumps({
             "mcpServers": {
@@ -346,8 +345,7 @@ class QoderProvider:
                         unattended: bool = False, unattended_minutes: int = 0,
                         unattended_deadline: float = 0.0, claw_prompt: bool = True,
                         runtime_limit: float = 0.0, stall_limit: float = 0.0,
-                        use_mcp: bool = True, claw_session: str = "default",
-                        office_room: str = ""):
+                        use_mcp: bool = True, claw_session: str = "default"):
         argv = self._argv_base() + ["-p", "--output-format", "stream-json"]
         # 模型请求瞬时故障由 CLI 自己重试（网络抖动/5xx），失败再由上层重开 CLI
         argv += ["--max-model-request-retries", str(int(self.max_model_retries or _MODEL_REQUEST_RETRIES))]
@@ -357,8 +355,7 @@ class QoderProvider:
         # MCP 桥接：内联配置注入（token/权限随会话变），并只放行本服务器
         if use_mcp and self.mcp_port and self.mcp_token and cwd:
             try:
-                argv += ["--mcp-config", self._mcp_config(cwd, permission, unattended,
-                                                          claw_session, office_room),
+                argv += ["--mcp-config", self._mcp_config(cwd, permission, unattended, claw_session),
                          "--allowed-mcp-server-names", "claw-agent",
                          # CLI 侧不认 MCP 工具默认要逐次确认（无头模式无人应答 → 直接失败），
                          # 这里放行整个服务器；真正的权限门在 Claw 侧按权限档位判定。
@@ -547,7 +544,7 @@ class QoderProvider:
     async def stream_chat(self, body: dict, *, session: str = "default",
                           permission: str = "standard", cwd: str | None = None,
                           attachments: list[str] | None = None,
-                          unattended: bool = False, office_room: str = ""):
+                          unattended: bool = False):
         """把 Qoder CLI 的 stream-json 转成 agent 循环可消费的 OpenAI SSE 行。
 
         重试策略：
@@ -608,7 +605,7 @@ class QoderProvider:
                         max_tokens, unattended=unattended,
                         unattended_minutes=_un_minutes, unattended_deadline=_un_deadline,
                         runtime_limit=runtime_limit, stall_limit=stall_limit,
-                        claw_session=session or "default", office_room=office_room):
+                        claw_session=session or "default"):
                     if kind == "reasoning":
                         produced = activity = True
                         yield self._sse({"choices": [{"delta": {"reasoning_content": payload}}]})

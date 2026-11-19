@@ -298,17 +298,6 @@ _threading.Thread(target=_auto_wechat_bg, daemon=True).start()
 
 MEM_CFG: dict = dict(CFG.get("memory", {}))
 MEM_CFG.setdefault("auto_promote_importance", 4)  # 目录记忆重要度达到此值自动提取到全局
-try:
-    import office as _office
-    _office.set_data_dir(DATA_ROOT)
-except Exception:
-    pass
-
-OFFICE_CFG: dict = dict(CFG.get("office") or {})
-OFFICE_CFG.setdefault("model", "qoder:Auto")       # 办公室全员走 Qoder
-OFFICE_CFG.setdefault("timeout", 180)
-OFFICE_CFG.setdefault("max_assignments", 4)
-OFFICE_CFG.setdefault("max_review_rounds", 1)
 STORE = get_store(
     DATA_ROOT / MEM_CFG.get("db", "memory/memory.db"),
     DATA_ROOT / MEM_CFG.get("export_dir", "memory/export"),
@@ -1111,13 +1100,12 @@ async def wb_chat_shim(payload: dict):
 @app.post("/internal/qoder/v1/chat/completions")
 async def qoder_chat_shim(payload: dict, session: str = "default",
                           permission: str = "standard", cwd: str = "", attachments: str = "",
-                          unattended: int = 0, office_room: str = ""):
+                          unattended: int = 0):
     """本地垫片：agent 循环的请求交给本机 Qoder CLI（官方无头模式，SSE 转换）。"""
     atts = [p for p in attachments.split("|") if p.strip()] if attachments else []
     return StreamingResponse(
         QD.stream_chat(payload, session=session, permission=permission,
-                       cwd=cwd or None, attachments=atts, unattended=bool(unattended),
-                       office_room=office_room),
+                       cwd=cwd or None, attachments=atts, unattended=bool(unattended)),
         media_type="text/event-stream",
     )
 
@@ -1169,7 +1157,7 @@ def _mcp_tools() -> list[dict]:
 
 
 async def _mcp_handle(msg: dict, cwd: str, permission: str, unattended: bool = False,
-                      session: str = "default", office_room: str = "dev") -> dict | None:
+                      session: str = "default") -> dict | None:
     mid = msg.get("id")
     method = str(msg.get("method") or "")
     params = msg.get("params") or {}
@@ -1234,8 +1222,6 @@ async def _mcp_handle(msg: dict, cwd: str, permission: str, unattended: bool = F
             "_ask_ui_active": _ask_ui_active(),
             "_session_id": str(session or "default"),
             "_self_port": SELF_PORT or int(CFG["server"]["port"]),
-            "_office_room": str(office_room or "dev"),
-            "_office": OFFICE_CFG,
             "_qd": QD,
         }
         text, success = await asyncio.to_thread(execute_tool, name, args, str(wd), cfg)
@@ -1256,7 +1242,7 @@ def _mcp_token_on_startup():
 
 @app.post("/internal/mcp")
 async def mcp_endpoint(request: Request, token: str = "", cwd: str = "", permission: str = "standard",
-                       unattended: int = 0, session: str = "default", office_room: str = "dev"):
+                       unattended: int = 0, session: str = "default"):
     if token != MCP_TOKEN:
         return JSONResponse({"jsonrpc": "2.0", "error": {"code": -32001, "message": "unauthorized"}}, status_code=401)
     try:
@@ -1266,11 +1252,11 @@ async def mcp_endpoint(request: Request, token: str = "", cwd: str = "", permiss
     if isinstance(msg, list):
         out = []
         for m in msg:
-            r = await _mcp_handle(m, cwd, permission, bool(unattended), session, office_room)
+            r = await _mcp_handle(m, cwd, permission, bool(unattended), session)
             if r is not None:
                 out.append(r)
         return JSONResponse(out)
-    r = await _mcp_handle(msg, cwd, permission, bool(unattended), session, office_room)
+    r = await _mcp_handle(msg, cwd, permission, bool(unattended), session)
     if r is None:
         return Response(status_code=202)
     return JSONResponse(r)
@@ -1778,7 +1764,6 @@ class ChatRequest(BaseModel):
     mode: str | None = None          # 值守模式：onduty（值守中，专用值守权限）/ unattended（无人监管）
     unattended: bool | None = None   # 兼容旧客户端：无人监管模式：不等人工确认、加大自动恢复、结束时汇报
     unattended_minutes: int | None = None  # 无人值守时长（分钟；0=不限时，默认 30）
-    office_room: str | None = None   # 当前会话的办公室房间：dev / life / memory
 
 
 _VISION_PROMPT = (
@@ -2015,9 +2000,6 @@ async def chat(req: ChatRequest):
         "【插件】需要给框架加全新工具能力（网络请求、解析、算法等代码类）时用 plugin_create 写 plugin.py（register(api) 注册工具，创建即热加载）；plugin_list 查看；改完可 plugin_reload 热重载。"
         "【更新】用户说“更新框架/升级”时用 framework_update（先 check 说明版本再 apply；apply 会重启应用）。"
         "【浏览器】需要打开网页、查在线资料、登录页操作、抓页面内容时用 browser_control（打开→取文字/点击/填表→截图）。"
-        "【办公室】需要项目开发、生活事务、记忆整理等多角色协作时，用 office_dispatch 把任务交给当前会话的主管；"
-        "主管会拆解并派员工执行，主管/员工消息会平铺进当前聊天。简单问答、单步操作不要用；"
-        "跨部门由主管对主管转接，你只需看最后汇报。"
         "【记忆】发现用户偏好、重要事实或长期信息，主动用 memory_write 记住。四层："
         "layer=1 常驻核心（特别重要、**不含经验**：身份/偏好/行为规则/安全/关系 → 每次都会注入你的上下文，"
         "**必须给 summary（≤60 字结论）**，content 第一句也要是结论）；"
@@ -2089,8 +2071,6 @@ async def chat(req: ChatRequest):
         "_ask_ui_active": _ask_ui_active(),
         "_session_id": session_id,
         "_self_port": SELF_PORT or int(CFG["server"]["port"]),
-        "_office_room": req.office_room or "dev",
-        "_office": OFFICE_CFG,
         "_qd": QD,
     }
     # Qoder：图片以附件形式直传给 CLI（文件落在工作目录内，Qoder 才能读）
@@ -2107,7 +2087,6 @@ async def chat(req: ChatRequest):
             f"&permission={quote(permission)}"
             f"&cwd={quote(str(workdir))}"
             f"&unattended={1 if unattended else 0}"
-            f"&office_room={quote(req.office_room or 'dev')}"
             f"{att_q}"
         )
     elif is_cloud:
@@ -2639,8 +2618,6 @@ async def team_message(req: TeamMessageRequest):
 WEB_DIST = BUNDLE / "web" / "dist"
 if (WEB_DIST / "assets").exists():
     app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")
-if (WEB_DIST / "office").exists():
-    app.mount("/office", StaticFiles(directory=WEB_DIST / "office", html=True), name="office")
 
 
 @app.get("/")
