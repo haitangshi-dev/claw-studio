@@ -27,6 +27,12 @@ PERMISSION_LEVELS = [
         "sandbox": "readonly",
     },
     {
+        "key": "ask",
+        "label": "询问",
+        "desc": "任何有副作用的操作都先问你（默认档）",
+        "sandbox": "ask",
+    },
+    {
         "key": "standard",
         "label": "标准",
         "desc": "沙箱：写入限工作目录，危险命令拦截",
