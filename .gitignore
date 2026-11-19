@@ -38,3 +38,7 @@ installer/Output/
 .idea/
 .DS_Store
 Thumbs.db
+
+# 本地预览产物
+_preview/
+_tmp_*.py

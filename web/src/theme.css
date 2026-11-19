@@ -1,0 +1,177 @@
+/* 主题 token：组件只引变量，永不写死颜色。
+   每套主题只需提供这一组值，新增主题 = 复制一节改 12 个色值。 */
+
+:root,
+:root[data-theme='warm'] {
+  --bg: #fbf7f0;
+  --surface: #fffdf9;
+  --surface-2: #f4ede1;
+  --border: #e4d8c3;
+  --border-strong: #cdbda2;
+  --text: #2b2117;
+  --text-muted: #6e5f4b;
+  --text-faint: #9c8b73;
+  --primary: #d9713a;
+  --primary-fg: #fff8f2;
+  --primary-soft: #fbeadf;
+  --accent: #2c7f9e;
+  --success: #1f9d6b;
+  --warning: #c2820e;
+  --danger: #c4453f;
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+:root[data-theme='paper'] {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #eaecf0;
+  --border: #d7dbe2;
+  --border-strong: #b9c0cc;
+  --text: #1f2430;
+  --text-muted: #5b6474;
+  --text-faint: #8b93a3;
+  --primary: #3b6fe0;
+  --primary-fg: #ffffff;
+  --primary-soft: #e6edfc;
+  --accent: #0e8f7e;
+  --success: #12855c;
+  --warning: #a86a00;
+  --danger: #c0392b;
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+:root[data-theme='ink'] {
+  --bg: #16161a;
+  --surface: #1e1e23;
+  --surface-2: #26262c;
+  --border: #33333b;
+  --border-strong: #4a4a55;
+  --text: #eceae6;
+  --text-muted: #a5a29c;
+  --text-faint: #75726d;
+  --primary: #e08a54;
+  --primary-fg: #211710;
+  --primary-soft: #3a2a20;
+  --accent: #5fb0ce;
+  --success: #4fb98a;
+  --warning: #d8a13a;
+  --danger: #e2695f;
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+:root[data-theme='indigo'] {
+  --bg: #0f1226;
+  --surface: #171b36;
+  --surface-2: #1e2444;
+  --border: #2c3560;
+  --border-strong: #414c80;
+  --text: #e8eaf6;
+  --text-muted: #a3aad0;
+  --text-faint: #6f77a3;
+  --primary: #8b7cf6;
+  --primary-fg: #12102a;
+  --primary-soft: #262046;
+  --accent: #4ecdc4;
+  --success: #4dd4a0;
+  --warning: #e3b341;
+  --danger: #f07178;
+  --radius: 14px;
+  --radius-sm: 9px;
+}
+
+:root[data-theme='forest'] {
+  --bg: #f3f6f1;
+  --surface: #ffffff;
+  --surface-2: #e7efe4;
+  --border: #d2e0cd;
+  --border-strong: #b3c9ac;
+  --text: #1c2a1e;
+  --text-muted: #52654f;
+  --text-faint: #7d8f7a;
+  --primary: #2f7a4a;
+  --primary-fg: #ffffff;
+  --primary-soft: #e2f0e5;
+  --accent: #a9722b;
+  --success: #2f7a4a;
+  --warning: #a9722b;
+  --danger: #b0432f;
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+:root[data-theme='contrast'] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f0f0f0;
+  --border: #000000;
+  --border-strong: #000000;
+  --text: #000000;
+  --text-muted: #333333;
+  --text-faint: #555555;
+  --primary: #0b57d0;
+  --primary-fg: #ffffff;
+  --primary-soft: #e8f0fe;
+  --accent: #b00020;
+  --success: #0b6b3a;
+  --warning: #7a4a00;
+  --danger: #b00020;
+  --radius: 6px;
+  --radius-sm: 4px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: var(--primary-soft);
+  color: var(--text);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.anim-in {
+  animation: fade-up 220ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-in {
+    animation: none;
+  }
+}

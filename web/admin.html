@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="warm">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Claw Studio · 设置</title>
+    <script>
+      // 首帧之前定主题，避免深色主题启动时闪一下白
+      try {
+        var s = JSON.parse(localStorage.getItem('claw-studio-settings') || '{}')
+        var t = (s.appearance && s.appearance.theme) || 'warm'
+        document.documentElement.dataset.theme = t
+        if (s.appearance && s.appearance.radius) {
+          document.documentElement.style.setProperty('--radius', s.appearance.radius + 'px')
+        }
+      } catch (e) {}
+    </script>
+    <style>
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+        background: #fbf7f0;
+      }
+      html[data-theme='ink'],
+      html[data-theme='indigo'] {
+        background: #16161a;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/admin/main.jsx"></script>
+  </body>
+</html>

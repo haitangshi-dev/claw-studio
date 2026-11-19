@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+  html[data-theme='ink'],
+  html[data-theme='indigo'] {
+    color-scheme: dark;
+  }
+  button {
+    font: inherit;
+  }
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+}
