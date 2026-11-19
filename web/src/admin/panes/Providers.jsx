@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   Check,
   Eye,
@@ -114,8 +114,48 @@ export default function Providers({ settings, set, online }) {
     }
   }
 
+  const [cli, setCli] = useState(null)
+  useEffect(() => {
+    fetch('/api/qoder/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setCli(d))
+      .catch(() => setCli(null))
+  }, [])
+  const today = cli?.usage ? Object.entries(cli.usage).sort().pop() : null
+
   return (
     <>
+      {cli?.available && (
+        <Section
+          title="本地 CLI 通道"
+          desc="当前没配 API Key 时用它顶着：复用本机 Qoder CLI 的登录态，不额外买 token。"
+          action={<Badge tone="warning">临时通道</Badge>}
+        >
+          <Card>
+            <Row
+              label={
+                <span className="flex items-center gap-2">
+                  <StatusDot tone={cli.logged_in ? 'success' : 'danger'} />
+                  Qoder CLI
+                  {cli.logged_in ? '已登录' : '未登录'}
+                </span>
+              }
+              hint={`${cli.models || 0} 个模型可用 · 换机器或退出登录即失效`}
+            >
+              <span className="font-mono text-[11.5px] text-faint">
+                {today ? `今日 ${today[1].calls} 次 / ${Number(today[1].credits || 0).toFixed(2)} 积分` : '今日暂无调用'}
+              </span>
+            </Row>
+            <Row
+              label="什么时候切成 API"
+              hint="配好任意一个 OpenAI 兼容供应商后，在下面的角色绑定里把「主力模型」指过去即可，代码不用动。"
+            >
+              <Badge tone="neutral">随时可切换</Badge>
+            </Row>
+          </Card>
+        </Section>
+      )}
+
       <Section
         title="推理供应商"
         desc="所有推理都走 OpenAI 兼容接口。密钥用 Windows DPAPI 加密后存放在本机，不会写进配置文件，也不进版本库。"
