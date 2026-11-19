@@ -310,13 +310,22 @@ async def run_agent(
             elif sb == 0:
                 body["reasoning_budget_tokens"] = 0
         if tools_enabled and not final_round:
-            body["tools"] = TOOL_SPECS
+            _specs = TOOL_SPECS
+            # 无人监管：把 ask_user 摘掉。留着它，模型仍会在岔路口弹一张没人点的卡片，
+            # 白等一轮超时；直接没有这个工具，它才会自己决策。
+            if agent_cfg.get("_no_ask"):
+                _specs = [t for t in TOOL_SPECS
+                          if (t.get("function") or {}).get("name") != "ask_user"]
+            body["tools"] = _specs
             body["tool_choice"] = "auto"
         # Qoder 的 CLI 只吃「最后一条用户消息 + 自带系统提示」，看不到上面的完整系统提示，
         # 所以把无人值守窗口单独塞进请求体，由 qoder.py 拼进 --append-system-prompt。
         if unattended and "/internal/qoder/" in chat_url:
             body["claw_unattended_minutes"] = unattended_minutes
             body["claw_unattended_deadline"] = unattended_deadline
+            # 预算也告诉 CLI：提示词里要写「工具预算 N 次，先做最值钱的事」，
+            # 真正的计数在 execute_tool 里做
+            body["claw_tool_budget"] = int((agent_cfg or {}).get("_tool_budget") or 40)
 
         reasoning_len = 0
         content = ""

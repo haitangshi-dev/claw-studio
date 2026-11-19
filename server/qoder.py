@@ -75,39 +75,30 @@ def _looks_transient(msg: str) -> bool:
     ))
 
 
-def _append_system_prompt(unattended: bool, minutes: int = 0, deadline: float = 0.0) -> str:
-    """追加给 CLI 的系统提示：Claw 环境的提问通道 + 无人监管规则。"""
+def _append_system_prompt(unattended: bool, minutes: int = 0, deadline: float = 0.0,
+                          budget: int = 40) -> str:
+    """追加给 CLI 的系统提示。
+
+    这里有个历史坑：CLI 只吃「最后一条用户消息」，主流程拼的完整 strategy 根本传不进来，
+    所以模式规则必须在这里自带一份。以前这一份是手写的另一套，还写着
+    「即使自认为任务完成也不要收尾，继续检查优化」——与主流程互相矛盾，
+    实测把一个「一句话回答」跑成了 35 次工具调用。现在统一从 prompts.py 取，
+    两处不会再各说各话。
+
+    长度受 Windows 命令行上限限制（约 8K 字符），所以只放必要部分。
+    """
+    import prompts
+
+    until = time.strftime("%H:%M", time.localtime(deadline)) if deadline else ""
     parts = [
-        "【Claw 环境】你在 Windows 上通过 Claw Agent 界面工作。需要用户拍板的岔路口，调用 MCP 工具 "
-        "ask_user（claw-agent 服务器）让主界面浮出选择卡片，不要用内置提问工具；"
-        "主界面没打开时会立刻退回「问题+编号选项」文字清单，不会卡住会话。能自己判断的不要问。",
-        "【记忆（主动）】在开始任何涉及用户环境、项目、源码、路径、配置、历史决定、之前做过的事的任务前，"
-        "主动先调用 memory_search 查相关记忆（中文关键词，必要时 memory_get 取全文），不需要用户提醒；"
-        "即使当前上下文里似乎已经知道，也先查证。用户问「你记得/还记得/源码在哪/之前/上次/路径/配置」时"
-        "必须先查记忆再回答，不要凭上下文或印象。发现可复用的源码路径、构建方式、端口、架构、用户偏好，"
-        "主动用 memory_write 保存（第一句写结论，加标签）；项目内经验写当前工作目录，跨目录通用规则用 scope=global。"
-        "会话上下文可能被压缩，长期事实以记忆为准。",
-        "【单 agent】你是 Claw，一个独立工作的 agent：用户交给你的任务由你自己直接用工具完成，"
-        "不需要派给部门/员工，也不存在「办公室」流程。先动手，做完汇报结果。",
+        "【Claw 环境】Windows。需要用户拍板时调用 MCP 工具 ask_user（claw-agent 服务器），"
+        "不要用内置提问工具；主界面没打开时会退回「问题+编号选项」文字清单。",
+        "【记忆】只在任务涉及用户环境、项目、源码、路径、配置、历史决定时先 memory_search；"
+        "闲聊与常识直接回答，不要为了「查证」反复检索。",
+        "【单 agent】你自己用工具把任务做完，没有部门/办公室流程，先动手再汇报结果。",
+        prompts.block("unattended" if unattended else "onduty", minutes, until, budget),
     ]
-    if unattended:
-        parts.append(
-            "【无人监管模式】用户执行期间不在场：不要等待任何人工确认；遇到岔路自行选择最稳妥、可回退的方案继续；"
-            "工具失败先自行重试或换方案，不要停下等人；结束前自检并验证结果；"
-            "最终汇报写清实际完成项、你的假设与未完成项。"
-        )
-        if minutes > 0 and deadline > 0:
-            until = time.strftime("%H:%M", time.localtime(deadline))
-            parts.append(
-                f"本次无人值守窗口 {minutes} 分钟（截止 {until}）："
-                "窗口未到之前，即使自认为任务完成也不要收尾，继续检查、验证并优化改进；"
-                "到点后再停止新工作并汇报。"
-            )
-        else:
-            parts.append(
-                "本次无人值守未设时长上限：持续自主推进并优化改进，直到用户手动停止；不要提前收尾。"
-            )
-    return " ".join(parts)
+    return "\n".join(parts)
 
 
 def _ctx_for(model_id: str) -> int:
@@ -345,13 +336,23 @@ class QoderProvider:
                         unattended: bool = False, unattended_minutes: int = 0,
                         unattended_deadline: float = 0.0, claw_prompt: bool = True,
                         runtime_limit: float = 0.0, stall_limit: float = 0.0,
-                        use_mcp: bool = True, claw_session: str = "default"):
+                        use_mcp: bool = True, claw_session: str = "default",
+                        tool_budget: int = 40):
         argv = self._argv_base() + ["-p", "--output-format", "stream-json"]
         # 模型请求瞬时故障由 CLI 自己重试（网络抖动/5xx），失败再由上层重开 CLI
         argv += ["--max-model-request-retries", str(int(self.max_model_retries or _MODEL_REQUEST_RETRIES))]
         if claw_prompt:
-            argv += ["--append-system-prompt",
-                     _append_system_prompt(unattended, unattended_minutes, unattended_deadline)]
+            _ap = _append_system_prompt(unattended, unattended_minutes, unattended_deadline,
+                                        tool_budget)
+            try:
+                import diag as _dg
+
+                _dg.info("qoder.prompt", unattended=bool(unattended), budget=tool_budget,
+                         chars=len(_ap), minutes=unattended_minutes,
+                         has_boundary="【任务边界】" in _ap, has_rules="【无人监管·自主模式】" in _ap)
+            except Exception:
+                pass
+            argv += ["--append-system-prompt", _ap]
         # MCP 桥接：内联配置注入（token/权限随会话变），并只放行本服务器
         if use_mcp and self.mcp_port and self.mcp_token and cwd:
             try:
@@ -561,6 +562,10 @@ class QoderProvider:
             _un_deadline = float(body.get("claw_unattended_deadline") or 0)
         except (TypeError, ValueError):
             _un_deadline = 0.0
+        try:
+            _tool_budget = int(body.get("claw_tool_budget") or 40)
+        except (TypeError, ValueError):
+            _tool_budget = 40
         if not prompt.strip():
             yield self._sse({"error": {"message": "Qoder：没有可发送的用户消息"}})
             yield "data: [DONE]\n\n"
@@ -605,7 +610,7 @@ class QoderProvider:
                         max_tokens, unattended=unattended,
                         unattended_minutes=_un_minutes, unattended_deadline=_un_deadline,
                         runtime_limit=runtime_limit, stall_limit=stall_limit,
-                        claw_session=session or "default"):
+                        claw_session=session or "default", tool_budget=_tool_budget):
                     if kind == "reasoning":
                         produced = activity = True
                         yield self._sse({"choices": [{"delta": {"reasoning_content": payload}}]})

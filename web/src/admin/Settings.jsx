@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   Brain,
+  Bug,
   CalendarClock,
   Cpu,
   Info,
@@ -19,6 +20,7 @@ import Appearance from './panes/Appearance'
 import Providers from './panes/Providers'
 import Permission from './panes/Permission'
 import { AboutPane, AutomationPane, MemoryPane, NotifyPane, WeChatPane } from './panes/Misc'
+import Logs from './panes/Logs'
 
 function GeneralPane({ settings, set }) {
   const g = settings.general
@@ -111,6 +113,7 @@ const NAV = [
   { id: 'notify', label: '通知', icon: Cpu, kw: '通知 提醒 耗时' },
   { id: 'automation', label: '定时任务', icon: CalendarClock, kw: '定时 计划 cron 自动化' },
   { id: 'extensions', label: '扩展', icon: Cpu, kw: '技能 插件 工具' },
+  { id: 'logs', label: '诊断日志', icon: Bug, kw: '日志 报错 排查 诊断 错误 traceback' },
   { id: 'about', label: '关于', icon: Info, kw: '版本 许可 仓库' },
 ]
 
@@ -158,6 +161,7 @@ export default function Settings({ onClose, onPreviewSplash }) {
     notify: <NotifyPane settings={settings} set={set} />,
     automation: <AutomationPane settings={settings} set={set} />,
     extensions: <ExtensionsPane />,
+    logs: <Logs />,
     about: <AboutPane />,
   }[current.id]
 

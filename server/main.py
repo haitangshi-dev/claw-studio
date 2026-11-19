@@ -383,6 +383,43 @@ import wechat_api as _wechat_api  # noqa: E402
 _wechat_api.configure(DATA_ROOT, CFG)
 app.include_router(_wechat_api.router)
 
+import diag as DIAG  # noqa: E402
+
+DIAG.configure(DATA_ROOT)
+try:
+    import tools as _t0
+
+    DIAG.info("app.start", root=str(DATA_ROOT), port=CFG.get("server", {}).get("port"),
+              models=len(_t0.TOOL_SPECS),
+              providers=len((_settings_api.load_settings().get("providers") or [])),
+              permission=(_settings_api.load_settings().get("permission") or {}).get("onDuty"))
+except Exception:
+    pass
+
+
+@app.get("/api/logs")
+def logs_list(limit: int = 200, level: str = "", q: str = ""):
+    """诊断日志：新→旧。level 取 debug/info/warn/error（至少该级别），q 全文包含匹配。"""
+    return {"ok": True, "items": DIAG.recent(limit, level, q), **DIAG.stats()}
+
+
+@app.post("/api/logs/clear")
+def logs_clear():
+    DIAG.clear()
+    return {"ok": True}
+
+
+@app.get("/api/logs/file")
+def logs_file():
+    """下载完整日志（界面上排查不动时，让用户直接把文件发过来）。"""
+    from fastapi.responses import FileResponse
+
+    st = DIAG.stats()
+    path = st.get("file") or ""
+    if not path or not Path(path).exists():
+        return JSONResponse({"ok": False, "error": "还没有日志文件"}, status_code=404)
+    return FileResponse(path, filename="claw-diag.jsonl", media_type="application/x-ndjson")
+
 
 def _memory_budget(model_key: str = "", is_qoder: bool = False) -> int:
     """L1 常驻预算 = 模型上下文 × 设置里的比例，夹在 1200–8000 字。
@@ -426,6 +463,10 @@ async def _guarded_sse(agen):
     except asyncio.CancelledError:
         raise
     except Exception as e:
+        try:
+            DIAG.error("chat.stream", e)
+        except Exception:
+            pass
         try:
             print(f"[Claw Agent] SSE 流异常: {type(e).__name__}: {e}", file=sys.stderr)
         except Exception:
@@ -1245,6 +1286,10 @@ async def _mcp_handle(msg: dict, cwd: str, permission: str, unattended: bool = F
             "_memory": MEM_CFG,
             "_project_root": str(root),
             "_permission": permission or "standard",
+            # MCP 是独立构造的 cfg，不带上预算的话 execute_tool 永远看不到它——
+            # qoder 这类自带 agent 循环的通道就只能靠模型自觉收手（实测 84 次不停）
+            "_tool_budget": int((CFG.get("agent") or {}).get("unattended_tool_budget") or 40)
+                            if unattended else 0,
             # 记忆作用域必须是规范化绝对路径键（与前端目录键一致），不能是目录名
             "_workspace": workspace_key(wd),
             "_workspace_path": str(wd),
@@ -1993,25 +2038,16 @@ async def chat(req: ChatRequest):
         unattended_minutes = max(0, min(unattended_minutes, 24 * 60))
         if unattended_minutes > 0:
             unattended_deadline = time.time() + unattended_minutes * 60
+    # 两套模式的行为准则完全不同（见 server/prompts.py）：
+    # 值守允许在岔路口提问；无人监管必须自主闭环、自己验证、按固定结构汇报。
+    import prompts as _prompts
+
     if unattended:
-        if unattended_minutes > 0:
-            _until = time.strftime("%H:%M", time.localtime(unattended_deadline))
-            _un_block = (
-                "【无人监管】当前是无人监管模式：用户执行期间不在场，不要等待确认；"
-                "遇到岔路自行选最稳妥、可回退的方案继续。"
-                f"本次无人值守窗口 {unattended_minutes} 分钟（截止 {_until}）："
-                "窗口未到之前，即使自认为任务已完成也不要收尾——继续检查、验证并改进可优化的点；"
-                "到点后再停止新工作，汇总汇报实际完成项、假设与未完成项。"
-            )
-        else:
-            _un_block = (
-                "【无人监管·不限时】当前是无人监管模式：用户执行期间不在场，不要等待确认；"
-                "遇到岔路自行选最稳妥、可回退的方案继续。本次未设时长上限：持续自主推进并改进，"
-                "直到用户手动停止；每一阶段完成都先自检、再继续找可优化项，"
-                "汇报时写清实际完成项、假设与未完成项。"
-            )
+        _until_lab = time.strftime("%H:%M", time.localtime(unattended_deadline)) if unattended_deadline else ""
+        _un_budget = int((CFG.get("agent") or {}).get("unattended_tool_budget") or 40)
+        _un_block = _prompts.block("unattended", unattended_minutes, _until_lab, _un_budget)
     else:
-        _un_block = ""
+        _un_block = _prompts.block("onduty")
 
     # 记忆注入：身份 + L1(全量) + L2(按当前输入检索) + L3(本会话近期)
     user_query = ""
@@ -2035,10 +2071,6 @@ async def chat(req: ChatRequest):
         + ("资料、文档、本地知识库内容，用 knowledge_search 检索；" if kb_ready else "")
         + "系统配置、文件内容、目录、程序状态这类真实环境数据，自己动手用工具获取，拿到结果再回答；"
         "常识、算术、推理、闲聊直接回答；"
-        "【提问】需求模糊、缺关键信息、或有多条可行路线难以猜测时，可以直接调用 ask_user 让主界面浮出选择卡片"
-        "（用户点选即答；主界面没开或处于无人监管模式时，会立刻退回「问题+编号选项」文字清单，不会卡住会话）；"
-        "也可以把同样的编号清单写进回复里让用户回序号。两种方式按场景选，"
-        "只用于真正需要用户拍板的岔路口，能自己判断就不要问；不要瞎猜。"
         + _un_block
         + "【工具规则】文件操作优先专用文件工具（file_read / file_create / file_edit / file_delete / file_move / file_search 等）；"
         "运行程序、查询系统用 run_shell，它默认在会话工作目录执行，文件用相对路径；需要在命令里写绝对路径时用双引号包住；"
@@ -2109,6 +2141,16 @@ async def chat(req: ChatRequest):
         _mem_notice = (f"核心记忆预算已满：{_mem_meta['used']}/{_mem_meta['budget']} 字"
                        f"（超 {_mem_meta['over_chars']} 字，条目全部注入未截断）")
 
+    # 记一条提示词摘要：排查「它为什么这样回答」时，第一件事就是确认注入了哪套规则
+    try:
+        DIAG.info("chat.prompt", session=session_id,
+                  mode="unattended" if unattended else "onduty",
+                  rules="自主模式" if "【无人监管·自主模式】" in base_system else "值守",
+                  chars=len(base_system),
+                  mem=len(mem_block or ""), plan=len(_plan_block or ""))
+    except Exception:
+        pass
+
     messages = _sanitize_history([dict(m) for m in req.messages])
     if messages and messages[0].get("role") == "system":
         messages[0]["content"] = base_system + "\n\n" + str(messages[0].get("content") or "")
@@ -2124,6 +2166,10 @@ async def chat(req: ChatRequest):
         "_workspace_path": str(workdir),
         "_update": CFG.get("update") or {},
         "_unattended": unattended,
+        "_no_ask": bool(unattended),   # 无人监管不给 ask_user，逼它自己判断
+        # 自主模式必须有自动刹车：没人看着时，模型能连调上百次工具而不收尾
+        "_tool_budget": int((CFG.get("agent") or {}).get("unattended_tool_budget") or 40)
+                        if unattended else 0,
         "_unattended_minutes": unattended_minutes,
         "_unattended_deadline": unattended_deadline,
         "_ask_ui_active": _ask_ui_active(),
@@ -2156,11 +2202,26 @@ async def chat(req: ChatRequest):
     else:
         chat_url = f"{SERVER.base}/v1/chat/completions"
 
+    _channel = "qoder" if is_qoder else ("api" if is_provider else "local")
+    _diag_model = str(req.model or key)
+
     async def gen():
         # 不设读取超时：模型/工具跑多久都不断流（连接超时仍保留 10 秒）
         timeout = httpx.Timeout(None, connect=10)
+        try:
+            import tools as _tj
+
+            _tj.reset_tool_budget(session_id)
+        except Exception:
+            pass
         collected = {"content": "", "steps": 0, "tools": []}
         t_gen0 = time.time()
+        try:
+            DIAG.info("chat.start", session=session_id, model=_diag_model, channel=_channel,
+                      mode="unattended" if unattended else "onduty", permission=permission,
+                      agent=bool(req.agent), msgs=len(messages))
+        except Exception:
+            pass
         # 核心记忆预算只提醒不截断：满了先提示一句（由模型自己决定精简哪几条）
         if _mem_notice:
             yield sse({"type": "notice", "text": _mem_notice})
@@ -2319,6 +2380,24 @@ async def chat(req: ChatRequest):
                         pass
                     try:
                         LIVE.done()
+                    except Exception:
+                        pass
+                    # 一次请求的收尾记录：定位「刚才那次为什么慢/为什么失败」靠这条
+                    try:
+                        DIAG.info("chat.done", session=session_id, model=_diag_model,
+                                  channel=_channel, elapsed_ms=int((time.time() - t_gen0) * 1000),
+                                  steps=int(ev.get("steps") or collected.get("steps") or 0),
+                                  chars=len(collected.get("content") or ""),
+                                  tools=len(collected.get("tools") or []),
+                                  tool_budget=int((agent_cfg or {}).get("_tool_budget") or 0),
+                                  error=str(ev.get("error") or "")[:300])
+                    except Exception:
+                        pass
+                elif t == "error":
+                    try:
+                        DIAG.warn("chat.error_event", session=session_id, model=_diag_model,
+                                  channel=_channel, detail=str(ev.get("message") or "")[:600],
+                                  elapsed_ms=int((time.time() - t_gen0) * 1000))
                     except Exception:
                         pass
                 yield sse(ev)

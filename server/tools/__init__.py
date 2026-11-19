@@ -128,6 +128,32 @@ def _rotate_log(path: Path, max_bytes: int, backups: int = 2) -> None:
         pass
 
 
+# ---------- 工具调用预算 ----------
+# 无人监管时人是走开的，必须有个自动刹车：模型（尤其自带 agent 循环的 CLI）
+# 会一直往下做，实测能连调上百次工具而不收尾。这里按会话计数，到上限就明确
+# 告诉它「该收尾了」，而不是硬切断进程（切断会让半成品状态更糟）。
+_CALL_COUNT: dict = {}
+_COUNT_LOCK = __import__("threading").Lock()
+
+
+def reset_tool_budget(session: str) -> None:
+    with _COUNT_LOCK:
+        _CALL_COUNT.pop(str(session or "-"), None)
+
+
+def tool_calls_used(session: str) -> int:
+    with _COUNT_LOCK:
+        return int(_CALL_COUNT.get(str(session or "-"), 0))
+
+
+def _bump_tool_calls(session: str) -> int:
+    key = str(session or "-")
+    with _COUNT_LOCK:
+        n = int(_CALL_COUNT.get(key, 0)) + 1
+        _CALL_COUNT[key] = n
+        return n
+
+
 def _audit(name: str, args: dict, ok: bool, out_len: int, workdir: str, cfg: dict,
            error: str = "", seconds: float | None = None) -> None:
     try:
@@ -156,6 +182,17 @@ def _audit(name: str, args: dict, ok: bool, out_len: int, workdir: str, cfg: dic
             entry["error"] = str(error or "")[:500]
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        if not ok:
+            # 同时进诊断日志：审计是「全量流水」，diag 是「错误清单」。
+            # 用户说「刚才报错了」时，在 diag 里按时间一条条看比翻审计快得多。
+            try:
+                import diag as _diag
+
+                _diag.warn("tool.failed", tool=name, workdir=workdir,
+                           permission=cfg.get("_permission") or "",
+                           detail=str(error or "")[:600])
+            except Exception:
+                pass
     except Exception:
         pass  # 审计失败不阻断主流程
 
@@ -206,6 +243,28 @@ def unregister_plugin_tools(names) -> None:
 
 
 def execute_tool(name: str, args: dict, workdir: str, cfg: dict) -> tuple[str, bool]:
+    # 调用预算：0 = 不限（值守模式，用户在场可以随时停）
+    _budget = 0
+    try:
+        _budget = int(cfg.get("_tool_budget") or 0)
+    except (TypeError, ValueError):
+        _budget = 0
+    if _budget > 0:
+        _used = _bump_tool_calls(str(cfg.get("_session_id") or "-"))
+        if _used == 1:
+            try:
+                import diag as _dg
+
+                _dg.info("tool.budget_active", session=str(cfg.get("_session_id") or "-"),
+                         budget=_budget)
+            except Exception:
+                pass
+        if _used > _budget:
+            _msg = (f"错误：本轮工具调用已达上限（{_budget} 次）。"
+                    "现在立即停止调用工具，用已有结果收尾并汇报：做了什么、验证了什么、"
+                    "还有哪些没做完、风险是什么。")
+            _audit(name, args or {}, False, len(_msg), workdir, cfg, error="工具调用超出预算")
+            return _msg, False
     """执行工具，返回 (结果文本, 是否成功)。异常统一转为给模型的错误文本。
 
     权限档位（cfg["_permission"]）：

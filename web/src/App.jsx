@@ -6,6 +6,7 @@ import { AskCard } from './components/Chat.jsx'
 import { WorkdirPanel } from './components/WorkdirPanel.jsx'
 import ApprovalCard from './components/ApprovalCard.jsx'
 import PlanPanel from './components/PlanPanel.jsx'
+import ModePopover from './components/ModePopover.jsx'
 import { CrabMark } from './ui/brand.jsx'
 import { MemoryPanel, ModelMenu, ParamsPanel, PermMenu, SkillsPanel, ThinkMenu, THINK_LEVELS, effortOptions } from './components/Panels.jsx'
 import { EffortIgnition } from './effort-ignition.jsx'
@@ -26,21 +27,6 @@ const TOOL_LABELS = {
 };
 const toolLabel = (name) => TOOL_LABELS[String(name || '').replace(/^mcp__claw-agent__/, '')] || String(name || '').replace(/^mcp__claw-agent__/, '');
 
-
-// 值守模式：值守中=按专用值守权限交互；无人监管=不等待确认，期间持续优化，到点/手动停止后汇报
-const MODE_OPTIONS = [
-  { k: 'onduty', lab: '值守中', desc: '有人值守：使用专用值守权限，需要拍板时弹选择卡片' },
-  { k: 'unattended', lab: '无人监管', desc: '无人值守：不等待确认，提前完成也会继续优化，到点暂停汇报' },
-]
-
-// 无人值守时长：30 分钟一格，5 档，最高无限
-const DURATION_OPTIONS = [
-  { k: 30, lab: '30 分钟', desc: '到点自动收尾并汇报' },
-  { k: 60, lab: '60 分钟', desc: '到点自动收尾并汇报' },
-  { k: 90, lab: '90 分钟', desc: '到点自动收尾并汇报' },
-  { k: 120, lab: '120 分钟', desc: '到点自动收尾并汇报' },
-  { k: 0, lab: '无限', desc: '不设时限：持续优化改进，直到手动停止' },
-]
 
 // 数字格式化：整数不带小数点，小数保留 2 位再去尾零
 const fmtNum = (n) => {
@@ -449,7 +435,6 @@ export default function App() {
   const [ignition, setIgnition] = useState(null) // 推理强度拉到底时的点火特效
   const [effortOpen, setEffortOpen] = useState(false) // 思考强度抽屉是否展开（默认收起）
   const [modeOpen, setModeOpen] = useState(false) // 值守模式抽屉是否展开
-  const [durationOpen, setDurationOpen] = useState(false) // 无人值守时长抽屉是否展开
 
   // 点空白处 / 按 Esc 收起思考强度抽屉
   useEffect(() => {
@@ -1871,7 +1856,6 @@ export default function App() {
                   onToggle={() => {
                     setEffortOpen((v) => !v)
                     setModeOpen(false)
-                    setDurationOpen(false)
                   }}
                   title={isCloudModel ? '思考档位（点击展开）' : '思考强度（点击展开）'}
                 />
@@ -1891,35 +1875,20 @@ export default function App() {
                 onClick={() => {
                   setModeOpen((v) => !v)
                   setEffortOpen(false)
-                  setDurationOpen(false)
                 }}
                 disabled={busy}
                 title={unattended
-                  ? '无人监管：不等待确认，提前完成会继续优化；到点或手动停止后汇报（点击切换）'
-                  : '值守中：按专用值守权限运行，需要拍板时弹卡片（点击切换）'}
+                  ? `无人监管 · ${unattendedMinutes === 0 ? '不限时' : unattendedMinutes + ' 分钟'}：自主决策、自行验证、收尾汇报（点击修改）`
+                  : '值守中：你在看着，遇到岔路会问你（点击切换为无人监管）'}
               >
                 <span className="unattended-dot" />
-                <span className="chip-name">{unattended ? '无人监管' : '值守中'}</span>
+                <span className="chip-name">
+                  {unattended
+                    ? `无人监管 · ${unattendedMinutes === 0 ? '不限时' : `${unattendedMinutes}m`}`
+                    : '值守中'}
+                </span>
                 <span className="chev"><IconChevron size={12} /></span>
               </button>
-              {unattended && (
-                <button
-                  type="button"
-                  className="chip"
-                  onClick={() => {
-                    setDurationOpen((v) => !v)
-                    setEffortOpen(false)
-                    setModeOpen(false)
-                  }}
-                  disabled={busy}
-                  title="无人值守时长：最后一档为无限（直到手动停止）"
-                >
-                  <span className="chip-name">
-                    {unattendedMinutes === 0 ? '时长 无限' : `时长 ${unattendedMinutes}m`}
-                  </span>
-                  <span className="chev"><IconChevron size={12} /></span>
-                </button>
-              )}
               <span className="tools-hint">
                 <kbd>Enter</kbd> 发送 · <kbd>Shift+Enter</kbd> 换行 · <kbd>Esc</kbd> 停止
               </span>
@@ -1935,31 +1904,18 @@ export default function App() {
                 onIgnite={() => setIgnition({ id: Date.now(), tier: isCloudModel ? 'ultra' : 'max' })}
               />
             )}
-            <EffortDrawer
+            <ModePopover
               open={modeOpen}
-              value={agentMode}
-              options={MODE_OPTIONS}
-              defaultKey="onduty"
-              heading="值守模式"
-              ariaLabel="值守模式"
-              onPick={(k) => {
+              mode={agentMode}
+              minutes={unattendedMinutes}
+              anchor="up"
+              onPickMode={(k) => {
                 setAgentMode(k)
-                setModeOpen(false)
+                // 选值守就关掉；选无人监管时留在弹层里让你顺手定个时长
+                if (k === 'onduty') setModeOpen(false)
               }}
-              onReset={() => setAgentMode('onduty')}
-            />
-            <EffortDrawer
-              open={durationOpen}
-              value={unattendedMinutes}
-              options={DURATION_OPTIONS}
-              defaultKey={30}
-              heading="无人值守时长"
-              ariaLabel="无人值守时长"
-              onPick={(k) => {
-                setUnattendedMinutes(Number(k))
-                setDurationOpen(false)
-              }}
-              onReset={() => setUnattendedMinutes(30)}
+              onPickMinutes={(n) => setUnattendedMinutes(Number(n))}
+              onClose={() => setModeOpen(false)}
             />
           </div>
         </div>

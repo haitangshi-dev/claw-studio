@@ -31,7 +31,8 @@
     "default_workdir": "workspace",
     "audit_log": "logs/tool-audit.jsonl",
     "unattended": false,
-    "max_model_request_retries": 5
+    "max_model_request_retries": 5,
+    "unattended_tool_budget": 40
   },
   "memory": {
     "db": "memory/memory.db",
