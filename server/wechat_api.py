@@ -64,9 +64,11 @@ def messages(limit: int = 60):
         return {"ok": False, "items": [], "error": "找不到微信桥接目录"}
     items: list[dict] = []
 
-    inbound_ok = {"status": "received"}
-    for sub in ("done",):
-        for p in (root / "inbox" / sub).glob("*.json"):
+    # inbox 根目录 = 已收到但 worker 还没消费。原来只读 inbox/done，
+    # worker 一卡住（没启动 / 端口冲突 / 崩了）你在微信发的消息在界面上就"消失"了。
+    for sub, st in (("", "queued"), ("done", "received"), ("ignored", "ignored")):
+        base = (root / "inbox" / sub) if sub else (root / "inbox")
+        for p in base.glob("*.json"):
             d = _read(p)
             if not d.get("text"):
                 continue
@@ -75,7 +77,7 @@ def messages(limit: int = 60):
                 "dir": "in",
                 "text": str(d.get("text") or "")[:4000],
                 "at": int(d.get("received_at") or 0) * 1000 or _ts_of(p),
-                "state": "received",
+                "state": st,
             })
 
     for p in (root / "outbox").glob("*.json"):

@@ -50,7 +50,14 @@ if FROZEN and (sys.stdout is None or sys.stderr is None):
     try:
         _log_dir = DATA_ROOT / "logs"
         _log_dir.mkdir(parents=True, exist_ok=True)
-        _logf = open(_log_dir / "framework.log", "a", encoding="utf-8", buffering=1)
+        _log_file = _log_dir / "framework.log"
+        try:
+            # 长跑一直追加（uvicorn 每个请求一行），启动时轮转一次，只留一个备份
+            if _log_file.exists() and _log_file.stat().st_size > 8 * 1024 * 1024:
+                os.replace(str(_log_file), str(_log_dir / "framework.log.1"))
+        except OSError:
+            pass
+        _logf = open(_log_file, "a", encoding="utf-8", buffering=1)
         if sys.stdout is None:
             sys.stdout = _logf
         if sys.stderr is None:
@@ -86,7 +93,6 @@ from workdirs import (  # noqa: E402
 )
 from native_folder import pick_folder as pick_native_folder  # noqa: E402
 from sandbox import PERMISSION_LEVELS, normalize_permission  # noqa: E402
-from workbuddy import WorkBuddyProvider  # noqa: E402
 from qoder import QoderProvider, QoderQuotaProvider  # noqa: E402
 from quota import QuotaRegistry  # noqa: E402
 import skills as skills_mod  # noqa: E402
@@ -118,7 +124,6 @@ PROFILES: dict = load_json(PROFILES_PATH).get("profiles", {})
 REGISTRY: dict = scan_models(CFG["model_scan_dirs"])
 CLOUD_ONLY = bool(CFG.get("cloud_only"))
 SERVER = LlamaServer(CFG, DATA_ROOT)
-WB = WorkBuddyProvider(DATA_ROOT)   # 云端模型提供方（WorkBuddy 登录态，只读复用）
 QD = QoderProvider(DATA_ROOT)       # 云端模型提供方（Qoder CLI 登录态，官方无头调用）
 QD.max_model_retries = int((CFG.get("agent") or {}).get("max_model_request_retries", 5) or 5)
 QD.max_runtime = float((CFG.get("agent") or {}).get("qoder_max_runtime_seconds", 0) or 0)  # 0 = 不设上限
@@ -627,20 +632,6 @@ def models():
     return {"models": out, "default": default_key, "current_path": cur, "cloud_only": cloud_only}
 
 
-# ---------------- WorkBuddy：通道已移除（保留占位，避免旧客户端静默失败） ----------------
-_WB_GONE = {"ok": False, "error": "WorkBuddy 通道已移除：请使用 Qoder 或本地模型"}
-
-
-@app.get("/api/wb/status")
-def wb_status():
-    return _WB_GONE
-
-
-@app.post("/api/wb/refresh")
-def wb_refresh():
-    return _WB_GONE
-
-
 @app.get("/api/qoder/status")
 def qoder_status():
     """Qoder CLI 接入状态（可用/已登录/模型数/最近用量）。"""
@@ -672,21 +663,6 @@ def quota_one(pid: str, refresh: int = 0):
         return p.get(force=bool(refresh))
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
-
-
-@app.get("/api/wb/credits")
-def wb_credits_api():
-    return _WB_GONE
-
-
-@app.get("/api/wb/checkin")
-def wb_checkin_status_api():
-    return _WB_GONE
-
-
-@app.post("/api/wb/checkin/auto")
-def wb_checkin_auto_api(payload: dict):
-    return _WB_GONE
 
 
 # ---------------- 通知设置 / 打开目录 ----------------
@@ -928,11 +904,6 @@ def open_path(payload: dict):
         return {"ok": False, "error": f"{type(e).__name__}: {e}"[:200]}
 
 
-@app.post("/api/wb/checkin")
-def wb_checkin_api():
-    return _WB_GONE
-
-
 # ---------------- 界面内提问（ask_user：把提问做进主界面，不弹系统窗口） ----------------
 # 通道：插件 ask_user 写 <DATA_ROOT>/.claw_ask/<id>.json（status=pending）→ 前端轮询
 # /api/ask/pending 拿到提问并浮出卡片 → 用户点选 → POST /api/ask/answer 写回答案 →
@@ -1133,12 +1104,6 @@ def update_info():
             "source_dir": _update_source()}
 
 
-@app.post("/internal/wb/v1/chat/completions")
-async def wb_chat_shim(payload: dict):
-    """本地垫片：agent 循环的 OpenAI 请求转发到 WorkBuddy 上游（SSE 透传）。"""
-    return StreamingResponse(WB.stream_chat(payload), media_type="text/event-stream")
-
-
 @app.post("/internal/qoder/v1/chat/completions")
 async def qoder_chat_shim(payload: dict, session: str = "default",
                           permission: str = "standard", cwd: str = "", attachments: str = "",
@@ -1283,7 +1248,6 @@ async def _mcp_handle(msg: dict, cwd: str, permission: str, unattended: bool = F
             # 记忆作用域必须是规范化绝对路径键（与前端目录键一致），不能是目录名
             "_workspace": workspace_key(wd),
             "_workspace_path": str(wd),
-            "_wb": WB,
             "_update": CFG.get("update") or {},
             "_unattended": bool(unattended),
             "_ask_ui_active": _ask_ui_active(),
@@ -1334,10 +1298,6 @@ def refresh_models():
     global REGISTRY
     REGISTRY = scan_models(CFG["model_scan_dirs"])
     # 云端目录一并强刷：上游窗口/档位会变，本地缓存 1 小时可能过期
-    try:
-        WB.catalog(force=True)
-    except Exception:
-        pass
     try:
         QD.models(force=True)
     except Exception:
@@ -1576,7 +1536,7 @@ def _notify_done(text: str) -> None:
 
 # ---------------- 专家模型（压缩 / 图片识别，可自定义） ----------------
 def _experts() -> dict:
-    # WorkBuddy 通道已移除：历史配置里的 wb: 专家一律忽略
+    # 历史配置里可能还留着 wb: 专家（通道已删除），直接忽略而不是让下游报错
     exp = dict(CFG.get("experts") or {})
     return {k: v for k, v in exp.items() if not str(v or "").startswith("wb:")}
 
@@ -1948,25 +1908,15 @@ async def chat(req: ChatRequest):
                 yield sse({"type": "done", "steps": 0})
             return StreamingResponse(_no_model(), media_type="text/event-stream")
     is_qoder = bool(req.model) and str(req.model).startswith("qoder:")
-    is_cloud = (not is_qoder) and bool(req.model) and str(req.model).startswith("wb:")
     import provider_proxy as PP
 
-    _prov = PP.parse_key(str(req.model or "")) if not (is_qoder or is_cloud) else None
+    _prov = PP.parse_key(str(req.model or "")) if not is_qoder else None
     is_provider = _prov is not None
     prov_pid, prov_model = (_prov or ("", ""))
-    cloud_id = ""
     qoder_id = ""
-    wb_meta: dict | None = None
     if is_qoder:
         qoder_id = str(req.model)[6:]
         key, path, params = str(req.model), None, {}
-    elif is_cloud:
-        cloud_id = str(req.model)[3:]
-        key, path, params = str(req.model), None, {}
-        try:
-            wb_meta = next((m for m in WB.catalog() if m["id"] == cloud_id), None)
-        except Exception:
-            wb_meta = None
     elif is_provider:
         # 用户在设置页配好的 OpenAI 兼容供应商：不走本地模型，也不懒启动任何进程
         key, path, params = str(req.model), None, {}
@@ -2172,7 +2122,6 @@ async def chat(req: ChatRequest):
         "_permission": permission,
         "_workspace": ws_key,
         "_workspace_path": str(workdir),
-        "_wb": WB,
         "_update": CFG.get("update") or {},
         "_unattended": unattended,
         "_unattended_minutes": unattended_minutes,
@@ -2198,9 +2147,6 @@ async def chat(req: ChatRequest):
             f"&unattended={1 if unattended else 0}"
             f"{att_q}"
         )
-    elif is_cloud:
-        _port = SELF_PORT or CFG["server"]["port"]
-        chat_url = f"http://127.0.0.1:{_port}/internal/wb/v1/chat/completions"
     elif is_provider:
         _port = SELF_PORT or CFG["server"]["port"]
         chat_url = (
@@ -2230,11 +2176,6 @@ async def chat(req: ChatRequest):
             if req.images:
                 if is_qoder and qoder_attachments:
                     yield sse({"type": "notice", "text": f"图片直传 Qoder（{len(qoder_attachments)} 张，附件模式）"})
-                elif is_cloud and wb_meta and wb_meta.get("images"):
-                    if messages and messages[-1].get("role") == "user":
-                        text0 = str(messages[-1].get("content") or "")
-                        messages[-1]["content"] = _cloud_image_parts(req.images, text0)
-                    yield sse({"type": "notice", "text": f"图片直传云端模型 {cloud_id}（{len(req.images)} 张，支持视觉）"})
                 else:
                     vision_key = str(_experts().get("vision") or "")
                     desc = ""
@@ -2252,7 +2193,7 @@ async def chat(req: ChatRequest):
                                 ) if vfiles else ""
                             else:
                                 vk, vpath, vparams = resolve_profile(vision_key)
-                                need_switch = (not is_cloud) and path is not None and Path(vpath).resolve() != Path(path).resolve()
+                                need_switch = path is not None and Path(vpath).resolve() != Path(path).resolve()
                                 if need_switch:
                                     yield sse({"type": "notice", "text": f"正在用 {vision_key} 识别图片（{len(req.images)} 张）…"})
                                     await asyncio.to_thread(SERVER.ensure, vpath, vparams)
@@ -2262,7 +2203,7 @@ async def chat(req: ChatRequest):
                                     await asyncio.to_thread(SERVER.ensure, path, params)
                         except Exception as e:
                             yield sse({"type": "notice", "text": f"图片识别失败（已尝试切回主模型）：{type(e).__name__}: {e}"})
-                            if not is_cloud and path is not None:
+                            if path is not None:
                                 try:
                                     await asyncio.to_thread(SERVER.ensure, path, params)
                                 except Exception:
@@ -2284,8 +2225,8 @@ async def chat(req: ChatRequest):
                 workdir=str(workdir),
                 max_steps=max_steps,
                 agent_cfg=agent_cfg,
-                model=(qoder_id if is_qoder else (cloud_id if is_cloud else None)),
-                reasoning_effort=(req.reasoning_effort if (is_cloud or is_qoder or is_provider) else None),
+                model=(qoder_id if is_qoder else None),
+                reasoning_effort=(req.reasoning_effort if (is_qoder or is_provider) else None),
                 own_tools=is_qoder,
             ):
                 t = ev.get("type")
@@ -2412,12 +2353,11 @@ async def compress(req: CompressRequest):
         if not req.model.startswith(("qoder:", "api:")):
             req.model = "qoder:Auto"
     is_qoder_expert = bool(req.model) and str(req.model).startswith("qoder:")
-    is_cloud = bool(req.model) and str(req.model).startswith("wb:")
     import provider_proxy as PP
 
-    _cpp = PP.parse_key(str(req.model or "")) if not (is_qoder_expert or is_cloud) else None
+    _cpp = PP.parse_key(str(req.model or "")) if not is_qoder_expert else None
     is_prov_expert = _cpp is not None
-    if is_cloud or is_qoder_expert or is_prov_expert:
+    if is_qoder_expert or is_prov_expert:
         key = str(req.model)
     else:
         try:
@@ -2470,16 +2410,6 @@ async def compress(req: CompressRequest):
                     "temperature": 0.3,
                     "max_tokens": 900,
                 },
-            )
-        elif is_cloud:
-            # 云端推理模型会把 max_tokens 大量消耗在思考上——压缩/识别任务不设小上限
-            summary = await WB.complete(
-                model=str(req.model)[3:],
-                messages=[
-                    {"role": "system", "content": "你是一个对话压缩器，输出精炼准确的摘要。"},
-                    {"role": "user", "content": _COMPRESS_PROMPT + "\n\n" + convo_text},
-                ],
-                temperature=0.3,
             )
         else:
             timeout = httpx.Timeout(300, connect=10)

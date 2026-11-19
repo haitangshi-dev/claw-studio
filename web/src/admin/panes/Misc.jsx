@@ -318,6 +318,8 @@ export function WeChatPane({ settings, set }) {
                       {fmtTime(m.at)}
                       {mine && m.state === 'pending' ? ' · 待发' : ''}
                       {mine && m.state === 'expired' ? ' · 已过期' : ''}
+                      {!mine && m.state === 'queued' ? ' · 待处理（处理进程可能没在跑）' : ''}
+                      {!mine && m.state === 'ignored' ? ' · 已忽略' : ''}
                       {mine && m.state === 'sent' ? ' · 已送达' : ''}
                     </div>
                   </div>
