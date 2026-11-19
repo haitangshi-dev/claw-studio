@@ -449,7 +449,7 @@ def run_shell(args: dict, workdir: str, cfg: dict) -> str:
     if (proc.returncode != 0 and "No such file or directory" in err
             and re.search(r"(/c/|[A-Za-z]:[\\/])", command)):
         parts.append(
-            "提示：命令行里的路径请用双引号包住（例如 \"/c/Users/demo/app\"），"
+            "提示：命令行里的路径请用双引号包住（例如 \"/c/path/to/app\"），"
             "以免路径中的空格或引号被 shell 当作语法处理；"
             "当前就在会话工作目录，也可直接用相对路径（如 hello_msg.py）"
         )

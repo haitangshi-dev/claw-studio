@@ -75,7 +75,7 @@ def _kill_pid(pid: int | None) -> bool:
 
 
 # 桥接目录候选（config.wechat.dir 优先）
-BRIDGE_SUBDIRS = ["workspace/wechat-bridge", "wechat-bridge"]
+BRIDGE_SUBDIRS = ["bridge", "workspace/wechat-bridge", "wechat-bridge"]
 
 # 心跳新鲜阈值（秒）。relay 的长轮询一次最多 35 秒，留足余量。
 RELAY_FRESH = 90.0
@@ -192,7 +192,7 @@ def status(cfg: dict | None = None, data_root: Path | None = None) -> dict:
         "bot_id": "",
         "inbox_pending": 0,
         "outbox_pending": 0,
-        "model": str(cfg_w.get("model") or "wb:auto"),
+        "model": str(cfg_w.get("model") or "qoder:Auto"),
         "auto_start": bool(cfg_w.get("auto_start")),
     }
     if bridge is None:
@@ -272,7 +272,7 @@ def start(cfg: dict | None = None, data_root: Path | None = None) -> dict:
     env = dict(os.environ)
     env["WECHAT_BRIDGE_HOME"] = str(bridge)
     env["PYTHONIOENCODING"] = "utf-8"
-    env["CLAW_MODEL"] = str(dict(cfg.get("wechat") or {}).get("model") or "wb:auto")
+    env["CLAW_MODEL"] = str(dict(cfg.get("wechat") or {}).get("model") or "qoder:Auto")
     env["CLAW_PERMISSION"] = str(dict(cfg.get("wechat") or {}).get("permission") or "standard")
     try:
         kw = {"cwd": str(bridge), "env": env,

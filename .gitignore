@@ -42,3 +42,12 @@ Thumbs.db
 # 本地预览产物
 _preview/
 _tmp_*.py
+
+# 微信桥接运行期数据
+bridge/state/
+bridge/secure/
+bridge/inbox/
+bridge/outbox/
+bridge/logs/
+bridge/qr/
+bridge/__pycache__/

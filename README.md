@@ -48,6 +48,34 @@ skills/            技能（外部脚本）
 plugins/           插件（进程内工具）
 ```
 
+## 隐私与数据
+
+这个项目**不收集、不上传任何使用数据**。所有内容都在你自己的机器上：
+
+| 数据 | 位置 | 说明 |
+|---|---|---|
+| 设置与供应商 | `data/settings.json` | API Key 用 **Windows DPAPI** 加密，只能在同一 Windows 用户下解开 |
+| 会话 | `sessions/*.json` | 一个会话一个文件，不上传 |
+| 记忆 | `memory/memory.db` | 本地 SQLite，可随时导出为 Markdown |
+| 微信桥接 | `bridge/`（`state/`、`secure/`） | 登录凭证只在本机，`secure/` 权限 700 |
+| 工具审计 | `logs/tool-audit.jsonl` | 每次工具调用留痕，自动滚动 |
+
+仓库里只提交**源码与配置模板**（`config/config.example.json`）。运行期目录全部在 `.gitignore` 里，
+克隆下来是干净的，不会有任何人的会话、记忆、密钥。
+
+## 发布前自检
+
+```bash
+python scripts/check_publish.py
+```
+
+它扫描 **git 已跟踪的文件**，检查个人路径（`C:/Users/...`）、API Key 形态、邮箱/手机号、
+微信 OpenID，以及"不该入库的路径"（`config/config.json`、`data/`、`sessions/`、`*.db`、`*.exe`）。
+退出码非 0 说明还有东西没清干净。
+
+> 注意：如果敏感内容**已经 push 过**，删文件不够——历史里仍然能翻到，需要 `git filter-repo` 重写历史，
+> 并立刻吊销对应凭证。
+
 ## 许可
 
 MIT

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """桌面宠物（Claw 宠物）的生命周期管理。
 
-背景：宠物是 `C:\\workspace\\dynamic-island\\pet` 下的一个 Electron 透明浮窗，
+背景：宠物是一个外部 Electron 透明浮窗（使用者自行提供宿主目录，用 config.pet.dir 指定），
 之前只能靠 `host/start-pet.bat` 手动拉起。这个模块把它接进设置面板：
     - 状态探测（在不在跑）
     - 启动 / 停止
@@ -10,7 +10,7 @@
 状态探测为什么不用扫进程：
     Windows 上 `Get-CimInstance Win32_Process` 一次要 3 秒上下（实测），
     放进设置面板的轮询里完全不能接受。所以让宠物自己每 2 秒写一个心跳
-    （dynamic-island/logs/pet-alive.json，见 pet/host/main.js），
+    （宿主目录下的 logs/pet-alive.json，见宿主 main.js），
     这里只读那个小文件 —— 亚毫秒级，且退出时会删掉，误判率低。
 """
 
@@ -26,11 +26,8 @@ from pathlib import Path
 # 无控制台启动（Claw Agent 是 --windowed 打包，不留神就会弹出命令行黑框）
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
 
-# 宠物宿主目录候选（第一个存在的即用；config.pet.dir 优先）
-PET_DIR_CANDIDATES = [
-    Path(r"C:\workspace\dynamic-island\pet\host"),
-    Path(r"C:\workspace\dynamic-island\pet"),
-]
+# 宠物宿主目录：只认配置里的 pet.dir（不再内置任何本机路径）
+PET_DIR_CANDIDATES: list[Path] = []
 
 # 心跳新鲜阈值（秒）。宠物每 2 秒写一次，留 3 个周期的余量。
 ALIVE_FRESH = 7.0
@@ -53,14 +50,14 @@ def resolve_pet_dir(cfg_pet: dict | None = None) -> Path | None:
 
 
 def resolve_electron(pet_dir: Path | None) -> Path | None:
-    """找到 electron.exe。宠物复用 dynamic-island 下 node_modules 里的 Electron。"""
+    """找到 electron.exe：只在宿主目录附近找，不引用仓库外的固定路径。"""
     cands: list[Path] = []
     if pet_dir is not None:
-        # pet/host → pet → dynamic-island
+        # pet/host → pet → 宠物宿主
         island = pet_dir.parent.parent
         cands.append(island / "node_modules" / "electron" / "dist" / "electron.exe")
         cands.append(pet_dir / "node_modules" / "electron" / "dist" / "electron.exe")
-    cands.append(Path(r"C:\workspace\dynamic-island\node_modules\electron\dist\electron.exe"))
+    """找到 electron.exe：只在宿主目录附近找，不引用仓库外的固定路径。"""
     for p in cands:
         try:
             if p.exists():
@@ -106,7 +103,7 @@ def status(cfg_pet: dict | None = None) -> dict:
         info["error"] = "找不到宠物目录（pet/host/main.js）"
         return info
     if electron is None:
-        info["error"] = "找不到 electron.exe（dynamic-island/node_modules）"
+    """找到 electron.exe：只在宿主目录附近找，不引用仓库外的固定路径。"""
     a = read_alive(pet_dir)
     if a:
         try:
@@ -130,7 +127,7 @@ def start(cfg_pet: dict | None = None) -> dict:
     if pet_dir is None:
         return {"ok": False, "error": "找不到宠物目录（pet/host/main.js）"}
     if electron is None:
-        return {"ok": False, "error": "找不到 electron.exe（dynamic-island/node_modules/electron）"}
+    """找到 electron.exe：只在宿主目录附近找，不引用仓库外的固定路径。"""
     try:
         kw = {"cwd": str(pet_dir), "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
         if _NO_WINDOW:
