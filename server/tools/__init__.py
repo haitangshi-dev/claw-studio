@@ -54,11 +54,12 @@ from .plugin_tools import (
 )
 from .update_tool import UPDATE_SPECS, framework_update
 from .office_tools import OFFICE_SPECS, office_dispatch, office_hire, office_roster, office_talk
+from plan import SPEC as PLAN_SPEC, handler as plan_handler
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 TOOL_SPECS: list[dict] = ([SHELL_SPEC, JOBS_SPEC] + FILE_SPECS + MEMORY_SPECS + [BROWSER_SPEC]
-                          + SKILL_SPECS + PLUGIN_SPECS + UPDATE_SPECS)
+                          + SKILL_SPECS + PLUGIN_SPECS + UPDATE_SPECS + [PLAN_SPEC])
 
 # 参数 schema 提示（供宽松类型强转用）：{tool: {param: {"type": ...}}}
 SCHEMA_HINTS: dict[str, dict] = {
@@ -67,6 +68,7 @@ SCHEMA_HINTS: dict[str, dict] = {
 }
 
 _HANDLERS = {
+    "task_plan": plan_handler,
     "run_shell": run_shell,
     "shell_jobs": shell_jobs,
     "file_read": file_read,

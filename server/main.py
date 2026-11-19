@@ -379,6 +379,11 @@ import approval as _approval  # noqa: E402
 _approval.configure(_settings_api.load_settings)
 app.include_router(_approval.router)
 
+import plan as PLAN  # noqa: E402
+
+PLAN.configure(DATA_ROOT)
+app.include_router(PLAN.router)
+
 
 def sse(obj: dict) -> str:
     return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
@@ -1997,8 +2002,9 @@ async def chat(req: ChatRequest):
         "界面会渲染成富文本。分点、给步骤、对比方案时用列表或表格，代码一律用 ```语言 围栏包住，"
         "比大段纯文字更好读；但别为了排版而排版，短回答直接说即可。"
         "【回答】用中文、简洁直接、先给结论。"
-        "一律先调用 office_dispatch（不传 room = 自动路由到主管部门），由主管部门带员工执行，"
-        "你只负责收口汇报；纯闲聊或一句话能答的才自己回。禁止绕开办公室单干。"
+        "【任务规划】需要三步以上的任务，先用 task_plan(action=set) 列出步骤（3–8 条，每条要可验收），"
+        "每完成一步立刻 task_plan(action=update, step_id=..., status=done) 并写一句产出摘要；"
+        "只记步骤与状态，不要写预计耗时。一步能做完的事和纯闲聊不要建计划。"
     )
     base_system = (
         f"你是 Claw Agent，在 Windows 上工作的 AI 助手。"
@@ -2011,6 +2017,9 @@ async def chat(req: ChatRequest):
                                    workspace=ws_key, workspace_label=ws_label)
     if mem_block:
         base_system = base_system + "\n\n" + mem_block
+    _plan_block = PLAN.render(session_id)
+    if _plan_block:
+        base_system = base_system + "\n\n" + _plan_block
     # 预算只提醒、不截断：满了就在主界面弹一条提示，由模型自己决定精简哪几条
     # （注意：这里不能 yield，chat() 不是生成器；提示交给下面的 gen() 发）
     _mem_notice = ""

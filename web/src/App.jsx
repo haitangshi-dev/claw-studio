@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { getExperts, getModels, getStatus, getQuotaProviders, streamChat, switchModel, getPendingAsk, answerAsk, skipAsk, getVoice, saveVoice, fetchTts, getApprovals } from './api.js'
+import { getExperts, getModels, getStatus, getQuotaProviders, streamChat, switchModel, getPendingAsk, answerAsk, skipAsk, getVoice, saveVoice, fetchTts, getApprovals, getPlan } from './api.js'
 import { ClawLogo, IconBrain, IconChat, IconChevron, IconEdit, IconFolder, IconGear, IconImage, IconMemory, IconPanelLeft, IconPlus, IconSearch, IconSend, IconSliders, IconStop, IconTrash, IconVolume, IconVolumeOff, IconX, toolIcon } from './icons.jsx'
 import { MessageList } from './components/Chat.jsx'
 import { AskCard } from './components/Chat.jsx'
 import { WorkdirPanel } from './components/WorkdirPanel.jsx'
 import { OfficePanel } from './components/OfficePanel.jsx'
 import ApprovalCard from './components/ApprovalCard.jsx'
+import PlanPanel from './components/PlanPanel.jsx'
 import { findRoom } from './office.js'
 import { MemoryPanel, ModelMenu, ParamsPanel, PermMenu, SkillsPanel, ThinkMenu, THINK_LEVELS, effortOptions } from './components/Panels.jsx'
 import { EffortIgnition } from './effort-ignition.jsx'
@@ -394,7 +395,7 @@ export default function App() {
     return initial.current.some((s) => s.id === saved) ? saved : initial.current[0].id
   })
   const [models, setModels] = useState([])
-  const [modelKey, setModelKey] = useState(() => localStorage.getItem('claw_model') || 'MiniCPM5-2B-Q4_K_M')
+  const [modelKey, setModelKey] = useState(() => localStorage.getItem('claw_model') || '')
   // 思考强度按模型记忆（输入框芯片或右键模型项设置）
   const [thinkByModel, setThinkByModel] = useState(() => {
     try {
@@ -591,6 +592,7 @@ export default function App() {
   // 界面内提问卡片（ask_user）：后端有 pending 提问时浮出，用户点选后回传
   const [ask, setAsk] = useState(null)
   const [approvals, setApprovals] = useState([])
+  const [plan, setPlan] = useState(null)
   const askDismissedRef = useRef(new Set())
   useEffect(() => {
     let stop = false
@@ -628,6 +630,24 @@ export default function App() {
     const t = setInterval(tick, 900)
     return () => { stop = true; clearInterval(t) }
   }, [])
+
+  useEffect(() => {
+    let stop = false
+    const sid = activeId
+    if (!sid) return undefined
+    const tick = async () => {
+      if (document.hidden) return
+      try {
+        const d = await getPlan(sid)
+        if (!stop && d && d.ok) setPlan(d.plan)
+      } catch (e) {
+        /* 离线忽略 */
+      }
+    }
+    tick()
+    const t = setInterval(tick, 1500)
+    return () => { stop = true; clearInterval(t) }
+  }, [activeId])
 
   const answerAskCard = async (val) => {
     const cur = ask
@@ -838,6 +858,11 @@ export default function App() {
         const cur = list.find((m) => m.current)
         const exists = list.some((m) => m.key === stored)
         if (cur && (!stored || !exists || !isCloudKey(stored))) setModelKey(cur.key)
+        else if (!exists) {
+          // 没有存过、也没有本地模型在跑：优先挑云端模型，避免选中一个不存在的 key
+          const first = list.find((m) => String(m.key).startsWith('qoder:')) || list[0]
+          if (first) setModelKey(first.key)
+        }
       })
       .catch(() => {})
 
@@ -1570,7 +1595,7 @@ export default function App() {
     const m = models.find((x) => x.key === modelKey)
     const name = m ? (m.name || m.key) : modelKey
     const running = m ? m.current : false
-    const permLabel = permission === 'readonly' ? '只读' : permission === 'full' ? '完全' : '标准'
+    const permLabel = permission === 'readonly' ? '只读' : permission === 'full' ? '完全' : permission === 'ask' ? '询问' : '标准'
     const thinkLabel = isCloudModel
       ? (thinkLevel || '默认')
       : thinkLevel === 0 ? '关闭' : `${thinkLevel} tok`
@@ -1727,6 +1752,14 @@ export default function App() {
           speakingId={speakingId}
         />
 
+        <PlanPanel
+          session={activeId}
+          plan={plan}
+          onRefresh={async () => {
+            const d = await getPlan(activeId)
+            if (d && d.ok) setPlan(d.plan)
+          }}
+        />
         <div className="inputbar">
           <div className={`status-bar ${activity.kind}`} title="模型当前状态">
             <span className="sb-dot" />

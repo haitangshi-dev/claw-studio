@@ -415,3 +415,23 @@ export async function answerApproval(id, action, reason = '') {
   })
   return r.json()
 }
+
+
+// ---------- 任务规划 ----------
+export async function getPlan(session) {
+  try {
+    const r = await fetch(`/api/plan?session=${encodeURIComponent(session)}`)
+    return r.ok ? await r.json() : { ok: false, plan: null }
+  } catch (e) {
+    return { ok: false, plan: null }
+  }
+}
+
+export async function postPlan(body) {
+  const r = await fetch('/api/plan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  })
+  return r.json()
+}
