@@ -127,6 +127,7 @@ export function WeChatPane({ settings, set }) {
 
   const pending = items.filter((i) => i.dir === 'out' && i.state === 'pending')
   const expired = items.filter((i) => i.dir === 'out' && i.state === 'expired')
+  const merged = items.filter((i) => i.dir === 'out' && i.state === 'merged')
 
   return (
     <>
@@ -167,7 +168,7 @@ export function WeChatPane({ settings, set }) {
           </Row>
           <Row label="发件队列" hint="窗口过期会被微信打回（错误 -2），这些不再无限重试，超 24 小时自动归档">
             <span className="font-mono text-[11.5px] text-faint">
-              待发 {pending.length} · 已过期 {expired.length}
+              待发 {pending.length} · 已过期 {expired.length} · 已合并 {merged.length}
             </span>
           </Row>
         </Card>
@@ -242,6 +243,7 @@ export function WeChatPane({ settings, set }) {
                       {fmtTime(m.at)}
                       {mine && m.state === 'pending' ? ' · 待发' : ''}
                       {mine && m.state === 'expired' ? ' · 已过期' : ''}
+                      {mine && m.state === 'merged' ? ' · 已合并' : ''}
                       {!mine && m.state === 'queued' ? ' · 待处理（处理进程可能没在跑）' : ''}
                       {!mine && m.state === 'ignored' ? ' · 已忽略' : ''}
                       {mine && m.state === 'sent' ? ' · 已送达' : ''}

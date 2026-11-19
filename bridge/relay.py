@@ -59,7 +59,7 @@ def heartbeat_loop() -> None:
 
 def ensure_layout() -> None:
     for path in (INBOX, INBOX / "done", INBOX / "ignored", OUTBOX, OUTBOX / "sent",
-                 OUTBOX / "bad", OUTBOX / "expired", SECURE, STATE):
+                 OUTBOX / "bad", OUTBOX / "expired", OUTBOX / "merged", SECURE, STATE):
         path.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(SECURE, 0o700)
@@ -291,7 +291,70 @@ def persist_client_id(path: Path, payload: dict[str, Any]) -> str:
     return client_id
 
 
+def merge_pending() -> int:
+    """把同一收件人的多条待发合并成一条摘要。
+
+    微信会话窗口有限：你不在的时候它把每件事都发一遍，等你回来可能十几条一起挤出去，
+    既刷屏、又容易整批撞上过期。合并成一条「你不在时又完成了 N 件事」更符合直觉。
+
+    合并保留最早那条（含它当时的 context_token），其余移到 outbox/merged/ 并写清单，
+    出问题能查回每条原文。
+    """
+    groups: dict[str, list[Path]] = {}
+    for path in sorted(OUTBOX.glob("*.json")):
+        payload = read_json(path)
+        if not isinstance(payload, dict):
+            continue
+        to_user = str(payload.get("to_user_id") or "")
+        if not to_user:
+            continue
+        groups.setdefault(to_user, []).append(path)
+
+    merged = 0
+    for _to_user, paths in groups.items():
+        if len(paths) < 2:
+            continue
+        payloads = []
+        for p in paths:
+            d = read_json(p)
+            if isinstance(d, dict):
+                payloads.append(d)
+        if len(payloads) < 2:
+            continue
+        head = payloads[0]
+        head_text = str(head.get("text") or "").strip()
+        others = payloads[1:]
+        lines = []
+        for pl in others:
+            t = str(pl.get("text") or "").strip().replace("\n", " ")
+            lines.append("· " + (t[:60] + "…" if len(t) > 60 else t))
+        head["text"] = (head_text + "\n\n——\n你不在时又完成了 %d 件事：\n" % len(others)
+                        + "\n".join(lines))
+        head["_merged_count"] = len(others)
+        atomic_json(paths[0], head)
+        try:
+            with open(OUTBOX / "merged" / "manifest.jsonl", "a", encoding="utf-8") as f:
+                f.write(json.dumps({"head": paths[0].name, "merged": len(others),
+                                    "at": int(time.time())}, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+        for p in paths[1:]:
+            try:
+                shutil.move(str(p), str(OUTBOX / "merged" / p.name))
+                merged += 1
+            except OSError:
+                pass
+    if merged:
+        print(f"Merged {merged} pending messages", flush=True)
+    return merged
+
+
 def drain_outbox(creds: dict[str, Any]) -> int:
+    # 先把堆积的多条合并成一条，再发——窗口有限，一条条发容易整批过期
+    try:
+        merge_pending()
+    except Exception as exc:
+        print(f"merge failed: {type(exc).__name__}: {exc}", file=sys.stderr)
     sent = 0
     token = str(creds["bot_token"])
     baseurl = str(creds.get("baseurl") or DEFAULT_BASE_URL).rstrip("/")

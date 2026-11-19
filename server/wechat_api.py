@@ -88,7 +88,7 @@ def messages(limit: int = 60):
             "attempts": int(d.get("_attempts") or 0),
             "error": str(d.get("_last_error") or "")[:160],
         })
-    for sub, st in (("sent", "sent"), ("expired", "expired")):
+    for sub, st in (("sent", "sent"), ("expired", "expired"), ("merged", "merged")):
         for p in (root / "outbox" / sub).glob("*.json"):
             d = _read(p)
             items.append({
