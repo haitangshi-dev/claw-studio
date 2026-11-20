@@ -229,16 +229,11 @@ async def run_agent(
     agent_cfg: dict,
     model: str | None = None,
     reasoning_effort: str | None = None,
-    own_tools: bool = False,
 ) -> AsyncIterator[dict]:
     convo = [dict(m) for m in messages]
-    is_local_shim = ("/internal/qoder/" in chat_url) or ("/internal/wb/" in chat_url)
-    if "/internal/qoder/" in chat_url:
-        model_label = "Qoder"
-    elif "/internal/wb/" in chat_url:
-        model_label = "云端"
-    else:
-        model_label = "llama-server"
+    # 剩余的本地垫片只有 api 供应商代理，它是标准 OpenAI 流，不算旧式 local shim
+    is_local_shim = False
+    model_label = "模型"
     step = 0
     final_round = False
     parse_retries = 0  # 工具参数截断的自动重试次数（不消耗步数）
@@ -250,7 +245,6 @@ async def run_agent(
     fab_retries = 0    # "编造完成"提醒次数（不消耗步数）
     tot_pred = 0       # 本轮累计生成 token 数（所有步合计）
     tot_ms = 0.0       # 本轮累计生成耗时（ms，timings 口径）
-    _own_tool_names: dict = {}  # 自带工具提供方（Qoder）的 tool_use_id → 工具名
 
     # 无人监管档位：提高各类自动恢复上限，不因小毛病停下等人
     unattended = bool(agent_cfg.get("_unattended"))
@@ -318,15 +312,6 @@ async def run_agent(
                           if (t.get("function") or {}).get("name") != "ask_user"]
             body["tools"] = _specs
             body["tool_choice"] = "auto"
-        # Qoder 的 CLI 只吃「最后一条用户消息 + 自带系统提示」，看不到上面的完整系统提示，
-        # 所以把无人值守窗口单独塞进请求体，由 qoder.py 拼进 --append-system-prompt。
-        if unattended and "/internal/qoder/" in chat_url:
-            body["claw_unattended_minutes"] = unattended_minutes
-            body["claw_unattended_deadline"] = unattended_deadline
-            # 预算也告诉 CLI：提示词里要写「工具预算 N 次，先做最值钱的事」，
-            # 真正的计数在 execute_tool 里做
-            body["claw_tool_budget"] = int((agent_cfg or {}).get("_tool_budget") or 40)
-
         reasoning_len = 0
         content = ""
         calls: dict = {}
@@ -401,26 +386,6 @@ async def run_agent(
                             if delta.get("tool_calls"):
                                 emitted = True
                                 _merge_tool_call_fragments(calls, delta["tool_calls"])
-                            # 自带工具的提供方（Qoder）：工具事件由它自己的流带过来
-                            tcall = obj.get("claw_tool_call")
-                            if tcall:
-                                emitted = True
-                                tool_attempted = True
-                                tid = str(tcall.get("id") or "")
-                                tname = str(tcall.get("name") or "tool")
-                                _own_tool_names[tid] = tname
-                                yield {"type": "tool_call", "id": tid,
-                                       "name": tname,
-                                       "arguments": tcall.get("arguments") or {}}
-                            tres = obj.get("claw_tool_result")
-                            if tres:
-                                emitted = True
-                                tid = str(tres.get("id") or "")
-                                tname = _own_tool_names.get(tid, "")
-                                yield {"type": "tool_result", "id": tid,
-                                       "name": tname, "ok": bool(tres.get("ok")),
-                                       "seconds": None, "output": str(tres.get("output") or ""),
-                                       "brief": (f"{tname}（Qoder）" if tname else "Qoder 工具")}
             except httpx.TransportError as e:
                 # 连接失败 / 超时 / 上游提前断开（httpx 的 TimeoutException 也属此类）
                 if not emitted and net_retries < max_net_retries:
@@ -454,8 +419,7 @@ async def run_agent(
         if not retry_needed:
             if not calls:
                 # 编造完成防线：说了"已创建/已运行"但本轮从未发起过工具调用 → 提醒核实
-                # （模型自带工具执行的提供方——如 Qoder——由它自己保证，不做此项误判）
-                if ((content or "").strip() and not tool_attempted and not own_tools
+                if ((content or "").strip() and not tool_attempted
                         and _FABRICATION_RE.search(content)
                         and fab_retries < max_fabricate_retries):
                     fab_retries += 1

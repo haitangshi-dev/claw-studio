@@ -476,7 +476,7 @@ export function MessageList({ messages, compacted, streaming, onPickPrompt, onRe
                   </div>
                   <div className="w-setup-desc">
                     填一个 OpenAI 兼容供应商（DeepSeek、OpenRouter、自建网关都行），
-                    或者确认本机的 Qoder CLI 已经登录。配好之后立刻就能对话。
+                    配好之后立刻就能对话。
                   </div>
                   <div className="w-setup-actions">
                     <button className="w-setup-btn primary" onClick={() => hero.onSetup && hero.onSetup()}>

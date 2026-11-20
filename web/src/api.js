@@ -170,12 +170,6 @@ export async function deleteSkill(name) {
   return r.json()
 }
 
-// Qoder CLI 接入状态（可用/已登录/模型数/用量）
-export async function getQoderStatus() {
-  const r = await fetch('/api/qoder/status')
-  return r.json()
-}
-
 // 额度（积分）管理：按接入方各注册一个 provider，前端按 provider 渲染多套额度设置
 export async function getQuotaProviders() {
   const r = await fetch('/api/quota')

@@ -112,7 +112,6 @@ from workdirs import (  # noqa: E402
 )
 from native_folder import pick_folder as pick_native_folder  # noqa: E402
 from sandbox import PERMISSION_LEVELS, normalize_permission  # noqa: E402
-from qoder import QoderProvider, QoderQuotaProvider  # noqa: E402
 from quota import QuotaRegistry  # noqa: E402
 import skills as skills_mod  # noqa: E402
 import plugins as plugins_mod  # noqa: E402
@@ -143,13 +142,8 @@ PROFILES: dict = load_json(PROFILES_PATH).get("profiles", {})
 REGISTRY: dict = scan_models(CFG["model_scan_dirs"])
 CLOUD_ONLY = bool(CFG.get("cloud_only"))
 SERVER = LlamaServer(CFG, DATA_ROOT)
-QD = QoderProvider(DATA_ROOT)       # 云端模型提供方（Qoder CLI 登录态，官方无头调用）
-QD.max_model_retries = int((CFG.get("agent") or {}).get("max_model_request_retries", 5) or 5)
-QD.max_runtime = float((CFG.get("agent") or {}).get("qoder_max_runtime_seconds", 0) or 0)  # 0 = 不设上限
-QD.stall_timeout = float((CFG.get("agent") or {}).get("qoder_stall_seconds", 1800) or 1800)
 # 额度（积分）提供方注册表：接一家就注册一个，设置面板自动多一套额度卡片
 QUOTA = QuotaRegistry()
-QUOTA.register(QoderQuotaProvider(QD, DATA_ROOT / "data"))
 # 桌面宠物的实时活动句柄（每次对话在 /api/chat 里重新创建；见 server/live.py）
 LIVE = None
 SELF_PORT: int | None = None        # 主程序启动时写入（垫片自调用用）
@@ -280,17 +274,6 @@ updater.EXIT_HOOK = _exit_hook
 
 
 import threading as _threading  # noqa: E402
-
-
-def _warm_qoder_bg() -> None:
-    """后台预热 Qoder 模型目录（首次调用 CLI 较慢，避免卡住 /api/models）。"""
-    try:
-        QD.models(force=True)
-    except Exception:
-        pass
-
-
-_threading.Thread(target=_warm_qoder_bg, daemon=True).start()
 
 
 def _auto_pet_bg() -> None:
@@ -519,7 +502,7 @@ def logs_file():
     return FileResponse(path, filename="claw-diag.jsonl", media_type="application/x-ndjson")
 
 
-def _memory_budget(model_key: str = "", is_qoder: bool = False) -> int:
+def _memory_budget(model_key: str = "") -> int:
     """L1 常驻预算 = 模型上下文 × 设置里的比例，夹在 1200–8000 字。
 
     固定 1800 字对不同模型的代价完全不同：32K 窗口的 1800 字是 5%，1M 窗口的 1800 字不到 0.2%。
@@ -527,11 +510,7 @@ def _memory_budget(model_key: str = "", is_qoder: bool = False) -> int:
     """
     ctx = 32768
     try:
-        if is_qoder:
-            from qoder import _ctx_for
-
-            ctx = int(_ctx_for(str(model_key).split(":", 1)[-1]))
-        elif model_key:
+        if model_key:
             prof = resolve_profile(model_key) or {}
             ctx = int(prof.get("ctx") or (CFG.get("defaults") or {}).get("ctx") or 32768)
     except Exception:
@@ -694,38 +673,8 @@ def models():
                 }
             )
     default_key = str(CFG.get("default_model") or "")
-    if cloud_only and not (default_key.startswith("qoder:") or default_key.startswith("api:")):
-        default_key = "qoder:Auto"
-    # Qoder 云端模型（官方 CLI 已安装并登录时并入；失败静默隐藏）
-    try:
-        if QD.available() and QD.logged_in():
-            for qm in QD.models():
-                key = f"qoder:{qm['id']}"
-                out.append(
-                    {
-                        "key": key,
-                        "name": qm["name"],
-                        "arch": "",
-                        "ctx_train": qm.get("ctx") or 200000,  # 官方模型上下文（Qoder 文档）
-                        "ctx": qm.get("ctx") or 200000,
-                        "size_label": "",
-                        "source": "qoder",
-                        "size_mb": None,
-                        "has_profile": False,
-                        "current": bool(cloud_only and key == default_key),
-                        "cloud": True,
-                        "provider": "qoder",
-                        "credits": "",
-                        "free": False,
-                        "tools": True,   # Qoder 自己执行内置工具（不经 Claw 工具循环）
-                        "images": True,  # 图片以附件直传（--attachment）
-                        "efforts": ["auto", "low", "medium", "high", "xhigh", "max"],
-                        "can_off": True,
-                        "effort_default": "auto",
-                    }
-                )
-    except Exception:
-        pass
+    if cloud_only and not default_key.startswith("api:"):
+        default_key = ""
     # 临时预览：内存里的凭据也进清单（主界面模型菜单能直接选到）
     try:
         import ephemeral as _eph0
@@ -789,18 +738,6 @@ def models():
     return {"models": out, "default": default_key, "current_path": cur, "cloud_only": cloud_only}
 
 
-@app.get("/api/qoder/status")
-def qoder_status():
-    """Qoder CLI 接入状态（可用/已登录/模型数/最近用量）。"""
-    try:
-        st = QD.status()
-        st["usage"] = QD.usage()
-        return st
-    except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
-
-
-# ---------------- 额度（积分）管理：按接入方各一套 ----------------
 @app.get("/api/quota")
 def quota_list():
     """所有额度提供方的元信息 + 缓存快照（不触网）。"""
@@ -1261,19 +1198,6 @@ def update_info():
             "source_dir": _update_source()}
 
 
-@app.post("/internal/qoder/v1/chat/completions")
-async def qoder_chat_shim(payload: dict, session: str = "default",
-                          permission: str = "standard", cwd: str = "", attachments: str = "",
-                          unattended: int = 0):
-    """本地垫片：agent 循环的请求交给本机 Qoder CLI（官方无头模式，SSE 转换）。"""
-    atts = [p for p in attachments.split("|") if p.strip()] if attachments else []
-    return StreamingResponse(
-        QD.stream_chat(payload, session=session, permission=permission,
-                       cwd=cwd or None, attachments=atts, unattended=bool(unattended)),
-        media_type="text/event-stream",
-    )
-
-
 @app.post("/internal/provider/v1/chat/completions")
 async def provider_chat_shim(payload: dict, pid: str = "", model: str = ""):
     """本地垫片：把 agent 循环的请求转发到设置页里配好的 OpenAI 兼容供应商（SSE 直通）。"""
@@ -1299,16 +1223,8 @@ async def provider_chat_shim(payload: dict, pid: str = "", model: str = ""):
     return StreamingResponse(body, media_type="text/event-stream")
 
 
-@app.get("/internal/qoder/models")
-def qoder_models_api():
-    try:
-        return {"ok": True, "models": QD.models(force=True)}
-    except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
-
-
-# ---------------- MCP 桥接：把 Claw 工具暴露给 Qoder CLI（官方 MCP 通道） ----------------
-# Qoder CLI 以 MCP 客户端身份连接本端点，工具调用回到主进程执行——
+# ---------------- MCP 桥接：把 Claw 工具暴露给自带工具循环的客户端 ----------------
+# 客户端以 MCP 身份连接本端点，工具调用回到主进程执行——
 # 与本地模型共用同一套实现：记忆库 / 技能 / 插件 / 浏览器 / 提问卡片 / 权限档 / 审计。
 MCP_TOKEN = secrets.token_urlsafe(18)
 
@@ -1403,7 +1319,7 @@ async def _mcp_handle(msg: dict, cwd: str, permission: str, unattended: bool = F
             "_project_root": str(root),
             "_permission": permission or "standard",
             # MCP 是独立构造的 cfg，不带上预算的话 execute_tool 永远看不到它——
-            # qoder 这类自带 agent 循环的通道就只能靠模型自觉收手（实测 84 次不停）
+            # 自带 agent 循环的通道就只能靠模型自觉收手（实测 84 次不停）
             "_tool_budget": int((CFG.get("agent") or {}).get("unattended_tool_budget") or 40)
                             if unattended else 0,
             # 记忆作用域必须是规范化绝对路径键（与前端目录键一致），不能是目录名
@@ -1414,7 +1330,6 @@ async def _mcp_handle(msg: dict, cwd: str, permission: str, unattended: bool = F
             "_ask_ui_active": _ask_ui_active(),
             "_session_id": str(session or "default"),
             "_self_port": SELF_PORT or int(CFG["server"]["port"]),
-            "_qd": QD,
         }
         text, success = await asyncio.to_thread(execute_tool, name, args, str(wd), cfg)
         return ok({"content": [{"type": "text", "text": text}], "isError": not success})
@@ -1458,21 +1373,16 @@ async def mcp_endpoint(request: Request, token: str = "", cwd: str = "", permiss
 def refresh_models():
     global REGISTRY
     REGISTRY = scan_models(CFG["model_scan_dirs"])
-    # 云端目录一并强刷：上游窗口/档位会变，本地缓存 1 小时可能过期
-    try:
-        QD.models(force=True)
-    except Exception:
-        pass
     return {"ok": True, "models": len(REGISTRY)}
 
 
 @app.post("/api/models/switch")
 async def switch_model(payload: dict):
     req_key = str(payload.get("key") or "")
-    # 通道型模型（qoder / api 供应商 / 临时连接）都不需要本地加载，前端记下即可。
-    # 之前只放行 qoder:，api: 落到 resolve_profile 直接报「未知模型」——
+    # 通道型模型（api 供应商 / 临时连接）都不需要本地加载，前端记下即可。
+    # api: 落到 resolve_profile 会报「未知模型」——
     # 表现就是模型菜单里明明看得到、一点切换就失败。
-    is_channel = req_key.startswith(("qoder:", "api:"))
+    is_channel = req_key.startswith("api:")
     if CFG.get("cloud_only") and not is_channel:
         return {"ok": False, "error": "本地模型已禁用：请选择云端模型"}
     if is_channel:
@@ -1512,7 +1422,7 @@ def get_load_params(model: str | None = None):
     """模型加载参数（defaults + 档案合并；model 省略时取当前粘性模型）。"""
     # 通道型模型没有本地加载参数：把框架默认值原样回回去，
     # 前端ParamsPanel 打开时才不会报「未知模型」。
-    if str(model or "").startswith(("api:", "qoder:")):
+    if str(model or "").startswith("api:"):
         return {"ok": True, **_load_view(str(model), {})}
     try:
         key, _path, merged = resolve_for_chat(model)
@@ -1525,7 +1435,7 @@ def get_load_params(model: str | None = None):
 async def set_load_params(req: LoadParamsRequest):
     """保存模型加载参数（写入 models.json 档案）；若该模型正在加载 → 立即重启生效。"""
     key = req.model
-    if str(key or "").startswith(("api:", "qoder:")):
+    if str(key or "").startswith("api:"):
         return {"ok": False, "error": "云端模型没有本地加载参数（采样用对话参数面板调）"}
     src = req.params or {}
     clean: dict = {}
@@ -1728,14 +1638,15 @@ def get_experts():
 
 
 def _known_expert(key: str) -> bool:
-    """专家模型合法性：本地注册表/档案，或 Qoder 云端模型（WorkBuddy 已移除）。"""
+    """专家模型合法性：本地注册表/档案，或 api: 供应商。"""
     if key in REGISTRY or key in PROFILES:
         return True
-    if key.startswith("wb:"):
-        return False
-    if key.startswith("qoder:"):
+    if key.startswith("api:"):
         try:
-            return any(f"qoder:{m['id']}" == key for m in QD.models())
+            import provider_proxy as _pp
+
+            pid, _model = _pp.parse_key(key) or ("", "")
+            return _pp.find_provider(pid) is not None
         except Exception:
             return False
     return False
@@ -2025,33 +1936,6 @@ def _cloud_image_parts(images: list, text: str) -> list[dict]:
     return content
 
 
-def _save_qoder_images(images: list, workdir: Path) -> list[str]:
-    """把图片（data URI）落盘到工作目录内，供 Qoder CLI 以 --attachment 直传。"""
-    out: list[str] = []
-    folder = workdir / "_uploads"
-    try:
-        folder.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        return out
-    for i, img in enumerate((images or [])[:4]):
-        try:
-            s = str(img)
-            if not s.startswith("data:image/"):
-                continue
-            head, b64 = s.split(",", 1)
-            ext = "png"
-            if "jpeg" in head or "jpg" in head:
-                ext = "jpg"
-            elif "webp" in head:
-                ext = "webp"
-            p = folder / f"qoder_{time.strftime('%Y%m%d_%H%M%S')}_{i}.{ext}"
-            p.write_bytes(base64.b64decode(b64))
-            out.append(str(p))
-        except Exception:
-            continue
-    return out
-
-
 def _pick_cloud_vision() -> str:
     """（已停用）WorkBuddy 通道移除后不再自动挑选云端视觉模型。"""
     return ""
@@ -2085,44 +1969,36 @@ async def _recognize_images(client: httpx.AsyncClient, images: list, user_text: 
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
-    # 全局只走云端：本地模型一律重定向到默认 Qoder 模型
+    # 全局只走云端：本地模型一律重定向到配置里的默认云端模型
     if CFG.get("cloud_only"):
-        _m = str(req.model or CFG.get("default_model") or "qoder:Auto")
-        # api: 前缀是设置页里配好的供应商，同样属于「云端」，不应被重定向掉
-        if not (_m.startswith("qoder:") or _m.startswith("api:")):
-            _m = "qoder:Auto"
+        _m = str(req.model or CFG.get("default_model") or "")
+        if not _m.startswith("api:"):
+            _m = ""
         req.model = _m
-    # WorkBuddy 通道已移除：旧会话/旧选择命中的模型给出明确提示（SSE 错误事件）
-    if bool(req.model) and str(req.model).startswith("wb:"):
-        async def _wb_gone():
-            yield sse({"type": "error", "message": "WorkBuddy 通道已移除：请在模型菜单选择 Qoder 或本地模型"})
+    # 旧通道已移除：给出明确提示（SSE 错误事件）
+    if bool(req.model) and str(req.model).startswith(("wb:", "qoder:")):
+        async def _gone():
+            yield sse({"type": "error", "message": "这个模型通道已移除：请在模型菜单选择已配置的 API 供应商"})
             yield sse({"type": "done", "steps": 0})
-        return StreamingResponse(_wb_gone(), media_type="text/event-stream")
-    # 没指定模型时用默认模型：api:/qoder: 是「通道型」key，必须原样透传，
-    # 否则会走到本地模型解析里报「未知模型」，表现为默认模型永远回空。
+        return StreamingResponse(_gone(), media_type="text/event-stream")
+    # 没指定模型时用默认模型：api: 是通道型 key，必须原样透传，
+    # 否则会走到本地模型解析里报「未知模型」。
     if not req.model:
         _d = str(CFG.get("default_model") or "")
-        if _d.startswith("api:") or _d.startswith("qoder:"):
+        if _d.startswith("api:"):
             req.model = _d
         elif not _d.strip():
-            # 一个模型都没配时给明确指引，而不是让下游抛「未知模型: 」
             async def _no_model():
                 yield sse({"type": "error",
-                           "message": "还没有可用的模型：打开设置 → 模型与 API，"
-                                      "填一个 OpenAI 兼容供应商（或确认 Qoder CLI 已登录）"})
+                           "message": "还没有可用的模型：打开设置 → 模型与 API，填一个 OpenAI 兼容供应商"})
                 yield sse({"type": "done", "steps": 0})
             return StreamingResponse(_no_model(), media_type="text/event-stream")
-    is_qoder = bool(req.model) and str(req.model).startswith("qoder:")
     import provider_proxy as PP
 
-    _prov = PP.parse_key(str(req.model or "")) if not is_qoder else None
+    _prov = PP.parse_key(str(req.model or ""))
     is_provider = _prov is not None
     prov_pid, prov_model = (_prov or ("", ""))
-    qoder_id = ""
-    if is_qoder:
-        qoder_id = str(req.model)[6:]
-        key, path, params = str(req.model), None, {}
-    elif is_provider:
+    if is_provider:
         # 用户在设置页配好的 OpenAI 兼容供应商：不走本地模型，也不懒启动任何进程
         key, path, params = str(req.model), None, {}
         if PP.find_provider(prov_pid) is None:
@@ -2143,7 +2019,7 @@ async def chat(req: ChatRequest):
     # 工作目录：请求级 > 配置默认（相对路径以项目根解析）
     permission = normalize_permission(req.permission)
     _mem_budget_key = key if not is_provider else f"api:{prov_model}"
-    _mem_cfg = {**MEM_CFG, "l1_budget_chars": _memory_budget(_mem_budget_key, is_qoder)}
+    _mem_cfg = {**MEM_CFG, "l1_budget_chars": _memory_budget(_mem_budget_key)}
     wd_raw = req.workdir or CFG.get("agent", {}).get("default_workdir", "workspace")
     workdir = Path(wd_raw)
     if not workdir.is_absolute():
@@ -2335,25 +2211,9 @@ async def chat(req: ChatRequest):
         "_ask_ui_active": _ask_ui_active(),
         "_session_id": session_id,
         "_self_port": SELF_PORT or int(CFG["server"]["port"]),
-        "_qd": QD,
     }
-    # Qoder：图片以附件形式直传给 CLI（文件落在工作目录内，Qoder 才能读）
-    qoder_attachments: list[str] = []
-    if is_qoder and req.images:
-        qoder_attachments = _save_qoder_images(req.images, workdir)
     max_steps = req.max_steps if req.max_steps is not None else int(agent_cfg.get("max_steps", 0))
-    if is_qoder:
-        _port = SELF_PORT or CFG["server"]["port"]
-        att_q = ("&attachments=" + quote("|".join(qoder_attachments))) if qoder_attachments else ""
-        chat_url = (
-            f"http://127.0.0.1:{_port}/internal/qoder/v1/chat/completions"
-            f"?session={quote(session_id)}"
-            f"&permission={quote(permission)}"
-            f"&cwd={quote(str(workdir))}"
-            f"&unattended={1 if unattended else 0}"
-            f"{att_q}"
-        )
-    elif is_provider:
+    if is_provider:
         _port = SELF_PORT or CFG["server"]["port"]
         chat_url = (
             f"http://127.0.0.1:{_port}/internal/provider/v1/chat/completions"
@@ -2362,7 +2222,7 @@ async def chat(req: ChatRequest):
     else:
         chat_url = f"{SERVER.base}/v1/chat/completions"
 
-    _channel = "qoder" if is_qoder else ("api" if is_provider else "local")
+    _channel = "api" if is_provider else "local"
     _diag_model = str(req.model or key)
 
     async def gen():
@@ -2395,33 +2255,21 @@ async def chat(req: ChatRequest):
         async with httpx.AsyncClient(timeout=timeout) as client:
             # 图片输入：云端模型支持视觉 → 直传；否则交视觉专家（本地或云端）识别
             if req.images:
-                if is_qoder and qoder_attachments:
-                    yield sse({"type": "notice", "text": f"图片直传 Qoder（{len(qoder_attachments)} 张，附件模式）"})
-                else:
                     vision_key = str(_experts().get("vision") or "")
                     desc = ""
                     if not vision_key:
                         yield sse({"type": "notice", "text": "未配置图片识别专家（可在模型参数里选择）"})
                     else:
                         try:
-                            if str(vision_key).startswith("qoder:"):
-                                # Qoder 视觉专家：图片落盘后以附件直传（无需切换本地模型）
-                                yield sse({"type": "notice", "text": f"正在用 Qoder 视觉模型 {vision_key} 识别图片（{len(req.images)} 张）…"})
-                                vtext = _VISION_PROMPT + (f"\n用户的问题是：{user_query[:200]}" if user_query else "")
-                                vfiles = _save_qoder_images(req.images, workdir)
-                                desc = await QD.complete(
-                                    model=str(vision_key)[6:], prompt=vtext, attachments=vfiles
-                                ) if vfiles else ""
-                            else:
-                                vk, vpath, vparams = resolve_profile(vision_key)
-                                need_switch = path is not None and Path(vpath).resolve() != Path(path).resolve()
-                                if need_switch:
-                                    yield sse({"type": "notice", "text": f"正在用 {vision_key} 识别图片（{len(req.images)} 张）…"})
-                                    await asyncio.to_thread(SERVER.ensure, vpath, vparams)
-                                desc = await _recognize_images(client, req.images, user_query)
-                                if need_switch:
-                                    yield sse({"type": "notice", "text": f"识别完成，切回主模型 {key}…"})
-                                    await asyncio.to_thread(SERVER.ensure, path, params)
+                            vk, vpath, vparams = resolve_profile(vision_key)
+                            need_switch = path is not None and Path(vpath).resolve() != Path(path).resolve()
+                            if need_switch:
+                                yield sse({"type": "notice", "text": f"正在用 {vision_key} 识别图片（{len(req.images)} 张）…"})
+                                await asyncio.to_thread(SERVER.ensure, vpath, vparams)
+                            desc = await _recognize_images(client, req.images, user_query)
+                            if need_switch:
+                                yield sse({"type": "notice", "text": f"识别完成，切回主模型 {key}…"})
+                                await asyncio.to_thread(SERVER.ensure, path, params)
                         except Exception as e:
                             yield sse({"type": "notice", "text": f"图片识别失败（已尝试切回主模型）：{type(e).__name__}: {e}"})
                             if path is not None:
@@ -2442,13 +2290,12 @@ async def chat(req: ChatRequest):
                 sampling=sampling,
                 thinking=bool(thinking),
                 budget=budget,
-                tools_enabled=bool(req.agent) and not is_qoder,
+                tools_enabled=bool(req.agent),
                 workdir=str(workdir),
                 max_steps=max_steps,
                 agent_cfg=agent_cfg,
-                model=(qoder_id if is_qoder else None),
-                reasoning_effort=(req.reasoning_effort if (is_qoder or is_provider) else None),
-                own_tools=is_qoder,
+                model=None,
+                reasoning_effort=(req.reasoning_effort if is_provider else None),
             ):
                 t = ev.get("type")
                 # ---- 实时活动广播：桌面宠物据此显示「思考/调工具/作答 + 正文」 ----
@@ -2582,21 +2429,20 @@ _COMPRESS_PROMPT = (
 async def compress(req: CompressRequest):
     """把一段对话历史交给模型压缩成摘要（供前端上下文压缩管理调用）。支持本地与云端专家。"""
     # 未指定压缩专家时：优先 roles.compact（设置页里绑的），退回默认模型。
-    # 通道型 key（qoder:/api:/wb:）必须原样透传，否则会被当成本地模型解析报「未知模型」。
+    # 通道型 key（api:）必须原样透传，否则会被当成本地模型解析报「未知模型」。
     if not req.model:
         _c = str((CFG.get("experts") or {}).get("compact") or CFG.get("default_model") or "")
-        if _c.startswith(("qoder:", "api:", "wb:")):
+        if _c.startswith("api:"):
             req.model = _c
-    if CFG.get("cloud_only") and not str(req.model or "").startswith(("qoder:", "api:")):
-        req.model = str(CFG.get("default_model") or "qoder:Auto")
-        if not req.model.startswith(("qoder:", "api:")):
-            req.model = "qoder:Auto"
-    is_qoder_expert = bool(req.model) and str(req.model).startswith("qoder:")
+    if CFG.get("cloud_only") and not str(req.model or "").startswith("api:"):
+        req.model = str(CFG.get("default_model") or "")
+        if not req.model.startswith("api:"):
+            req.model = ""
     import provider_proxy as PP
 
-    _cpp = PP.parse_key(str(req.model or "")) if not is_qoder_expert else None
+    _cpp = PP.parse_key(str(req.model or ""))
     is_prov_expert = _cpp is not None
-    if is_qoder_expert or is_prov_expert:
+    if is_prov_expert:
         key = str(req.model)
     else:
         try:
@@ -2632,13 +2478,7 @@ async def compress(req: CompressRequest):
         "chat_template_kwargs": {"enable_thinking": False},
     }
     try:
-        if is_qoder_expert:
-            # Qoder 专家：单次聚合（不保留会话）
-            summary = await QD.complete(
-                model=str(req.model)[6:],
-                prompt=_COMPRESS_PROMPT + "\n\n" + convo_text,
-            )
-        elif is_prov_expert:
+        if is_prov_expert:
             summary = await PP.complete(
                 _cpp[0], _cpp[1],
                 {
@@ -2660,7 +2500,6 @@ async def compress(req: CompressRequest):
             return {"ok": False, "error": "模型返回了空摘要"}
         # 压缩完切回会话主模型（单实例：下次对话无缝衔接；云端模型无需切回）
         if (req.restore_model and req.restore_model != key
-                and not str(req.restore_model).startswith("qoder:")
                 and not str(req.restore_model).startswith("api:")
                 and not str(req.restore_model).startswith("wb:")):
             try:
@@ -3005,9 +2844,6 @@ if __name__ == "__main__":
         except (IndexError, ValueError):
             pass
     SELF_PORT = port  # 垫片路由自调用用
-    # MCP 桥接：把端口/token 交给 Qoder provider（每次调用前写 .mcp.json）
-    QD.mcp_port = port
-    QD.mcp_token = MCP_TOKEN
     _save_mcp_token()
     url = f"http://{host if host != '0.0.0.0' else '127.0.0.1'}:{port}"
     print(f"[Claw Agent] {time.strftime('%Y-%m-%d %H:%M:%S')} 启动  界面 {url}")

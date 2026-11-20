@@ -133,7 +133,6 @@ const HANDLERS = [
   [/^\/api\/wechat$/, () => json({ ok: true, running: false, logged_in: false, can_start: false, models: 0 })],
   [/^\/api\/wechat\/messages/, () => json({ ok: true, items: WECHAT_ITEMS })],
   [/^\/api\/wechat\/send/, () => json({ ok: false, error: '演示模式：不会真的发消息' })],
-  [/^\/api\/qoder\/status$/, () => json({ ok: true, available: false, logged_in: false, models: 0 })],
   [/^\/api\/settings$/, () => json({ ok: true, settings: {} })],
   [/^\/api\/memory/, () => json({ ok: true, entries: [], stats: {}, tags: [] })],
   [/^\/api\/skills/, () => json({ ok: true, skills: [] })],

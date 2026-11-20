@@ -25,7 +25,7 @@ API = os.environ.get("CLAW_API", "http://127.0.0.1:8090/api/chat")
 SESSION = os.environ.get("CLAW_SESSION", "wechat")
 PERMISSION = os.environ.get("CLAW_PERMISSION", "standard")
 # 强制走云端模型：绝不使用本地模型（本地 2B 模型约 1.4 tokens/s，会卡死会话）
-MODEL = os.environ.get("CLAW_MODEL") or "qoder:Auto"   # 别再用已下线的 wb: 通道
+MODEL = os.environ.get("CLAW_MODEL") or ""   # 模型由后端配置决定
 POLL = float(os.environ.get("WECHAT_WORKER_POLL", "3"))
 TIMEOUT = float(os.environ.get("CLAW_TIMEOUT", "1800"))
 MAXLEN = int(os.environ.get("WECHAT_MAXLEN", "3500"))

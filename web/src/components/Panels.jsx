@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   getMemory, getLoadParams, setLoadParams, setExperts, getSkills, getSkillDetail, deleteSkill,
   getPlugins, reloadPlugins, togglePlugin, deletePlugin, getUpdateInfo, checkUpdate, applyUpdate,
-  getNotify, setNotify, openPath, getQoderStatus, getQuotaProviders, getProviderQuota,
+  getNotify, setNotify, openPath, getQuotaProviders, getProviderQuota,
   getPet, startPet, stopPet, setPetAuto,
   getWechat, startWechat, stopWechat, setWechatAuto,
   getVoice, saveVoice, fetchTts,
@@ -44,7 +44,7 @@ export function ModelMenu({ models, currentKey, disabled, onSwitch, thinkByModel
   }, [])
   const localModels = (models || []).filter((m) => !m.cloud)
   const cloudModels = (models || []).filter((m) => m.cloud)
-  // 云端按提供方分组：Qoder / API 供应商（顺序按出现先后）
+  // 云端按提供方分组（顺序按出现先后）
   const cloudGroups = (() => {
     const by = {}
     const order = []
@@ -56,7 +56,7 @@ export function ModelMenu({ models, currentKey, disabled, onSwitch, thinkByModel
       }
       by[p].push(m)
     }
-    const LABEL = { qoder: 'Qoder', api: 'API 供应商' }
+    const LABEL = { api: 'API 供应商' }
     return order.map((p) => ({ provider: p, label: LABEL[p] || p, models: by[p] }))
   })()
   const displayName = ((models || []).find((m) => m.key === currentKey) || {}).name || currentKey
@@ -163,7 +163,7 @@ export function ModelMenu({ models, currentKey, disabled, onSwitch, thinkByModel
           <div className="mm-params" onClick={() => { onOpenParams && onOpenParams(); setOpen(false) }}>
             <IconSliders size={13} /> 采样与运行参数…
           </div>
-          <div className="model-menu-hint">右键模型项可设置思考强度 · 云端模型走 Qoder 账号（官方 CLI）</div>
+          <div className="model-menu-hint">右键模型项可设置思考强度 · 云端模型走已配置的 API 供应商</div>
         </div>
       )}
     </div>
@@ -580,8 +580,7 @@ function VoiceSection({ onVoiceChange }) {
 }
 
 export function ParamsPanel({ modelKey, params, onChange, onResetAll, onClose, onApplied, models, experts, onExpertsSaved, onQuotaUpdated, onVoiceChange }) {
-  const isCloud = String(modelKey || '').startsWith('qoder:')
-  const isQoder = String(modelKey || '').startsWith('qoder:')
+  const isCloud = String(modelKey || '').startsWith('api:')
   // 云端模型的真实上限（上游 /v3/config 提供）：输入窗口 = 压缩触发基准，输出上限 = 单轮生成上限
   const cloudMeta = isCloud ? ((models || []).find((m) => m.key === modelKey) || null) : null
   const [load, setLoad] = useState(null) // {params, defaults, overridden}
@@ -596,7 +595,6 @@ export function ParamsPanel({ modelKey, params, onChange, onResetAll, onClose, o
   const [notifyCfg, setNotifyCfg] = useState(null)
   const [notifyMsg, setNotifyMsg] = useState('')
   const [openMsg, setOpenMsg] = useState('')
-  const [qoder, setQoder] = useState(null)      // Qoder CLI 状态/用量 { available, logged_in, models, usage }
   const [quotaProviders, setQuotaProviders] = useState([]) // 额度提供方（接一家多一套额度设置）
   const [quotaBusyId, setQuotaBusyId] = useState('')        // 正在刷新的 provider id
   const [quotaMsg, setQuotaMsg] = useState('')             // 刷新结果提示
@@ -768,12 +766,6 @@ export function ParamsPanel({ modelKey, params, onChange, onResetAll, onClose, o
     }
   }
 
-  const loadQoder = () => {
-    getQoderStatus()
-      .then((d) => setQoder(d))
-      .catch(() => setQoder({ ok: false }))
-  }
-
   const loadQuotaList = () => {
     getQuotaProviders()
       .then((d) => setQuotaProviders((d && d.providers) || []))
@@ -804,7 +796,6 @@ export function ParamsPanel({ modelKey, params, onChange, onResetAll, onClose, o
   }
 
   useEffect(() => {
-    loadQoder()
     loadQuotaList()
     getNotify()
       .then((d) => {
@@ -964,34 +955,11 @@ export function ParamsPanel({ modelKey, params, onChange, onResetAll, onClose, o
             </div>
           )}
           <div className="param-sep" />
-          <div className="param-note">云端 · Qoder（本机 CLI，官方无头接入）</div>
-          <div className="cred-box">
-            {!qoder && <div className="cred-row"><span className="cred-pkg">检测中…</span></div>}
-            {qoder && (
-              <>
-                <div className="cred-total">
-                  {!qoder.available ? '未安装 Qoder CLI'
-                    : !qoder.logged_in ? 'CLI 未登录'
-                    : <>已登录 <span className="cred-n">{qoder.models} 个模型</span></>}
-                </div>
-                {qoder.available && !qoder.logged_in && (
-                  <div className="cred-row"><span className="cred-pkg">终端运行 qodercli login 完成授权后，模型自动出现</span></div>
-                )}
-                <div className="cred-row"><span className="cred-pkg">工具由 Qoder 自己执行；权限跟随输入框档位</span></div>
-                <div className="cred-row"><span className="cred-pkg">额度见上方「额度管理」</span></div>
-              </>
-            )}
-            <div style={{ display: 'flex', gap: 8, marginTop: 2, alignItems: 'center' }}>
-              <button className="pf-reset" onClick={loadQoder}>重新检测</button>
-            </div>
-          </div>
           <div className="param-sep" />
           <div className="param-note">
-            {isQoder
-              ? '当前模型：云端（Qoder）。工具由 Qoder 自行执行；采样参数由 CLI 管理（温度暂不生效），最大输出与思考档位已接入。'
-              : `当前模型：${modelKey}。以下采样参数按模型保存，修改后下一轮对话立即生效；显示"默认"的项使用框架配置值。`}
+            当前模型：{modelKey}。以下采样参数按模型保存，修改后下一轮对话立即生效；显示"默认"的项使用框架配置值。
           </div>
-          {PARAM_DEFS.filter((d) => (isQoder ? d.key === 'max_tokens' : isCloud ? d.cloud : true)).map((rawDef) => {
+          {PARAM_DEFS.filter((d) => (isCloud ? d.cloud : true)).map((rawDef) => {
             // 云端模型的输出上限按上游 maxOutputTokens 放开（如 GLM-5.3 = 64K、Space-Bunny = 128K），
             // 本地模型维持 16384（32K 上下文下已实际拉满）。
             const d = rawDef.key === 'max_tokens' && cloudMeta && cloudMeta.ctx_max_out
@@ -1032,10 +1000,10 @@ export function ParamsPanel({ modelKey, params, onChange, onResetAll, onClose, o
           <div className="param-note">
             {isCloud
               ? (cloudMeta
-                  ? `云端模型（Qoder）：上下文窗口 ${Math.round((cloudMeta.ctx_train || 0) / 1000)}K（上游真实输入上限，压缩按它触发）`
+                  ? `云端模型：上下文窗口 ${Math.round((cloudMeta.ctx_train || 0) / 1000)}K（上游真实输入上限，压缩按它触发）`
                     + (cloudMeta.ctx_max_out ? ` · 单轮输出上限 ${Math.round(cloudMeta.ctx_max_out / 1000)}K` : '')
                     + '；加载参数由服务端管理，此处不适用。'
-                  : '云端模型（Qoder）：上下文窗口跟随上游配置（目录未拉到，按 200K 保守估算）。')
+                  : '云端模型：上下文窗口跟随上游配置（目录未拉到，按 200K 保守估算）。')
               : '模型加载参数：修改后自动重启该模型生效（约 7 秒）；模型未加载时仅保存，下次启动时应用。'}
           </div>
           {!isCloud && LOAD_DEFS.map((d) => {

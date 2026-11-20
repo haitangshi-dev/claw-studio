@@ -15,8 +15,8 @@ import { EffortDrawer, EffortTrigger } from './effort-drawer.jsx'
 let uid = 0
 const genId = () => `m${Date.now()}_${uid++}`
 
-// 云端模型判定（Qoder：走官方 CLI 登录态、无需本地加载）
-const isCloudKey = (k) => String(k || '').startsWith('qoder:')
+// 云端模型判定（api: 走 OpenAI 兼容端点，无需本地加载）
+const isCloudKey = (k) => String(k || '').startsWith('api:')
 
 const TOOL_LABELS = {
   run_shell: '执行命令', shell_jobs: '后台任务',
@@ -239,7 +239,6 @@ const buildPayload = (msgs, compacted) => {
   for (const m of msgs.slice(from)) {
     if (m.role === 'user' && m.content) out.push({ role: 'user', content: m.content })
     else if (m.role === 'assistant' && m.done) {
-      // MCP 工具由 Qoder 自己执行，本地模型不认识这些名字 → 回放时不带出去
       const done = (m.toolCalls || []).filter(
         (tc) => tc.status === 'done' && tc.name && !String(tc.name).startsWith('mcp__')
       )
@@ -670,7 +669,7 @@ export default function App() {
   busyRef.current = busy
 
   // 手机 Claw 主动发来的消息：通过后端的 /api/live 推送到当前聊天，
-  // 复用现有 send 链路（保持当前模型/会话/Qoder 上下文），用户能看到完整问答。
+  // 复用现有 send 链路（保持当前模型/会话上下文），用户能看到完整问答。
   useEffect(() => {
     sendRef.current = send
   })
@@ -839,7 +838,7 @@ export default function App() {
       .then((d) => {
         setModels(d.models || [])
         // 选择校验：模型不在列表（如已移除的 WorkBuddy）→ 回落本地当前模型；
-        // 本地 llama 在跑且选的是本地模型 → 跟随当前加载；云端（Qoder）选择保留
+        // 本地 llama 在跑且选的是本地模型 → 跟随当前加载；云端选择保留
         const stored = localStorage.getItem('claw_model') || ''
         const list = d.models || []
         const cur = list.find((m) => m.current)
@@ -847,7 +846,7 @@ export default function App() {
         if (cur && (!stored || !exists || !isCloudKey(stored))) setModelKey(cur.key)
         else if (!exists) {
           // 没有存过、也没有本地模型在跑：优先挑云端模型，避免选中一个不存在的 key
-          const first = list.find((m) => String(m.key).startsWith('qoder:')) || list[0]
+          const first = list[0]
           if (first) setModelKey(first.key)
         }
       })
