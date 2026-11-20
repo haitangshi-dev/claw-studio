@@ -329,8 +329,9 @@ const PARAM_DEFS = [
 const LOAD_DEFS = [
   {
     key: 'ctx', label: '上下文长度',
-    desc: '模型单次能看到的总 token 数；2GB 显存下推荐 ≤ 32K',
+    desc: '优先自动检测（读 GGUF 元数据）；也可手填任意值，常用 8K/16K/32K/64K',
     choices: [[8192, '8K'], [16384, '16K'], [32768, '32K'], [65536, '64K']],
+    custom: true,
   },
   {
     key: 'kv', label: 'KV 量化',
@@ -871,7 +872,7 @@ export function ParamsPanel({ modelKey, params, onChange, onResetAll, onClose, o
     try {
       const r = await setLoadParams(modelKey, patch)
       if (r.ok) {
-        setLoad({ params: r.params, defaults: r.defaults, overridden: r.overridden })
+        setLoad(r)
         setLoadMsg(r.restarted ? '已生效（模型已重启）' : '已保存（模型未加载，下次启动生效）')
         if (onApplied) onApplied()
       } else {
@@ -1017,6 +1018,16 @@ export function ParamsPanel({ modelKey, params, onChange, onResetAll, onClose, o
                   {overridden && <span className="pf-custom">已自定义</span>}
                 </div>
                 <div className="choice-row">
+                  {d.custom && (
+                    <button
+                      className={'choice-chip' + (!overridden ? ' on' : '')}
+                      disabled={loadBusy || !load}
+                      onClick={() => { if (overridden) applyLoad(d.key, 'auto') }}
+                      title="用模型 GGUF 元数据里的上下文长度"
+                    >
+                      自动检测{load?.auto_ctx ? ` ${Math.round(load.auto_ctx / 1024)}K` : ''}
+                    </button>
+                  )}
                   {d.choices.map(([v, lab]) => (
                     <button
                       key={String(v)}
@@ -1030,9 +1041,36 @@ export function ParamsPanel({ modelKey, params, onChange, onResetAll, onClose, o
                     </button>
                   ))}
                 </div>
+                {d.custom && (
+                  <div className="ctx-custom-row">
+                    <input
+                      type="number"
+                      min={1024}
+                      max={131072}
+                      step={1024}
+                      placeholder={load?.auto_ctx ? String(load.auto_ctx) : '自定义 token 数'}
+                      defaultValue={overridden ? cur : ''}
+                      disabled={loadBusy || !load}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return
+                        const v = Number(e.target.value)
+                        if (v >= 1024 && v <= 131072) applyLoad(d.key, v)
+                      }}
+                    />
+                    <button
+                      disabled={loadBusy || !load}
+                      onClick={(e) => {
+                        const v = Number(e.target.previousElementSibling.value)
+                        if (v >= 1024 && v <= 131072) applyLoad(d.key, v)
+                      }}
+                    >
+                      应用
+                    </button>
+                  </div>
+                )}
                 <div className="pf-bottom">
                   <span className="pf-desc">{d.desc}</span>
-                  {load && <span className="pf-def">默认 {loadDefLab(d)}</span>}
+                  {load && <span className="pf-def">{overridden ? '自动 ' + (load.auto_ctx ? Math.round(load.auto_ctx/1024)+'K' : '默认') : '自动检测'}</span>}
                 </div>
               </div>
             )

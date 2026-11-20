@@ -1430,11 +1430,21 @@ class LoadParamsRequest(BaseModel):
 def _load_view(key: str, merged: dict) -> dict:
     defaults = SERVER.defaults
     prof = PROFILES.get(key, {})
+    # 自动检测 ctx：GGUF 元数据里的训练上下文长度（模型能力上限）。
+    # 前端「自动」档就是用它；读不到时返回 0，让前端回退到默认值。
+    auto_ctx = 0
+    _reg = REGISTRY.get(key) or {}
+    try:
+        auto_ctx = int((_reg.get("meta") or {}).get("ctx_train") or 0)
+    except (TypeError, ValueError):
+        auto_ctx = 0
     return {
         "model": key,
         "params": {k: merged.get(k, defaults.get(k)) for k in _LOAD_KEYS},
         "defaults": {k: defaults.get(k) for k in _LOAD_KEYS},
         "overridden": [k for k in _LOAD_KEYS if k in prof],
+        "auto_ctx": auto_ctx,
+        "auto_source": "GGUF 元数据" if auto_ctx else "",
     }
 
 
@@ -1461,13 +1471,18 @@ async def set_load_params(req: LoadParamsRequest):
     src = req.params or {}
     clean: dict = {}
     if "ctx" in src:
-        try:
-            v = int(src["ctx"])
-        except (TypeError, ValueError):
-            return {"ok": False, "error": "ctx 必须是整数"}
-        if not (1024 <= v <= 131072):
-            return {"ok": False, "error": "ctx 范围 1024 ~ 131072"}
-        clean["ctx"] = v
+        raw = src["ctx"]
+        # null / 0 / "auto" 表示「回到自动检测」：删掉档案里的 ctx 覆盖。
+        if raw is None or raw == "" or raw == "auto" or raw == 0:
+            clean["ctx"] = "AUTO"
+        else:
+            try:
+                v = int(raw)
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "ctx 必须是整数或 auto"}
+            if not (1024 <= v <= 131072):
+                return {"ok": False, "error": "ctx 范围 1024 ~ 131072"}
+            clean["ctx"] = v
     for kk in ("kv_k", "kv_v"):
         if kk in src:
             v = str(src[kk])
@@ -1502,7 +1517,9 @@ async def set_load_params(req: LoadParamsRequest):
         if ref.get("note"):
             prof["note"] = ref["note"]
     for k, v in clean.items():
-        if v == SERVER.defaults.get(k):
+        if v == "AUTO":
+            prof.pop(k, None)  # 回到自动检测 → 删掉覆盖，用 GGUF 元数据
+        elif v == SERVER.defaults.get(k):
             prof.pop(k, None)  # 与默认一致 → 不落档案
         else:
             prof[k] = v

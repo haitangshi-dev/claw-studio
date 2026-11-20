@@ -2718,3 +2718,20 @@ body {
   border: 1px solid color-mix(in srgb, var(--primary) 24%, transparent);
 }
 .avatar.brand-avatar svg rect { /* 像素标记自带主题色 */ }
+
+/* 上下文长度：自动 + 自定义 */
+.ctx-custom-row { display: flex; gap: 6px; margin: 7px 0 2px; }
+.ctx-custom-row input {
+  flex: 1; min-width: 0; height: 28px;
+  padding: 0 9px; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--bg); color: var(--text);
+  font-family: var(--mono, monospace); font-size: 11.5px; outline: 0;
+}
+.ctx-custom-row input:focus { border-color: var(--primary); }
+.ctx-custom-row button {
+  height: 28px; padding: 0 11px; border: 1px solid var(--border);
+  border-radius: 7px; background: var(--surface-2); color: var(--text);
+  font-size: 11.5px; cursor: pointer;
+}
+.ctx-custom-row button:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.ctx-custom-row button:disabled { opacity: .45; cursor: default; }
