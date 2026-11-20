@@ -4,6 +4,7 @@ import '../theme.css'
 import './preview.css'
 import { CrabMark } from '../ui/brand'
 import { streamChat } from '../api'
+import ModelPicker from '../components/ModelPicker'
 
 /**
  * 临时预览页：填一个 API Key 就能真的对话。
@@ -31,6 +32,8 @@ function App() {
   const [model, setModel] = useState('')
   const [models, setModels] = useState([])
   const [probing, setProbing] = useState(false)
+  const [savedProviders, setSavedProviders] = useState([])
+  const [usingSaved, setUsingSaved] = useState('')
   const [status, setStatus] = useState(null)
   const [busy, setBusy] = useState('')
   const [note, setNote] = useState('')
@@ -46,6 +49,14 @@ function App() {
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setStatus(d))
       .catch(() => setStatus(null))
+  }, [])
+
+  // 已保存的供应商：直接拿来用，不用在预览页重新填 Key
+  useEffect(() => {
+    fetch('/api/providers')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setSavedProviders((d && d.providers) || []))
+      .catch(() => setSavedProviders([]))
   }, [])
 
   useEffect(() => {
@@ -111,6 +122,7 @@ function App() {
     setBusy('')
     if (r.ok) {
       setStatus(r)
+      setUsingSaved('')
       setApiKey('')          // 立刻从输入框里抹掉，不留在 DOM 里
       setNote('已连接。Key 只在服务端内存中，未写入任何文件。')
     } else {
@@ -122,6 +134,7 @@ function App() {
   const disconnect = async () => {
     await fetch('/api/ephemeral', { method: 'DELETE' }).catch(() => null)
     setStatus(null)
+    setUsingSaved('')
     setNote('已断开，内存中的 Key 已清除')
     setTimeout(() => setNote(''), 4000)
   }
@@ -149,7 +162,7 @@ function App() {
     abortRef.current = streamChat(
       {
         messages: [...history, { role: 'user', content: text }],
-        model: `api:${EPH_ID}/${model}`,
+        model: usingSaved || `api:${EPH_ID}/${model}`,
         agent: true,
         session_id: 'preview',
         permission: 'ask',
@@ -195,7 +208,7 @@ function App() {
     setApprovals((prev) => prev.filter((x) => x.id !== item.id))
   }
 
-  const connected = !!(status && status.active)
+  const connected = !!(usingSaved || (status && status.active))
 
   return (
     <div className="pv">
@@ -211,7 +224,9 @@ function App() {
         </div>
         <div className="flex items-center gap-2">
           <span className={`pv-pill ${connected ? 'on' : ''}`}>
-            {connected ? `已连接 · ${status.model || '未指定模型'}` : '未连接'}
+            {connected
+              ? `已连接 · ${usingSaved || status.model || '未指定模型'}`
+              : '未连接'}
           </span>
           {connected && (
             <button className="pv-btn ghost" onClick={disconnect}>
@@ -251,37 +266,62 @@ function App() {
             <label>
               <span>
                 模型名
-                {models.length > 0 && (
-                  <em className="pv-hint">已自动获取 {models.length} 个</em>
-                )}
               </span>
-              <div className="pv-model-row">
-                <input
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder="deepseek-chat"
-                  list="pv-model-list"
-                />
-                <datalist id="pv-model-list">
-                  {models.map((m) => (
-                    <option key={m} value={m} />
-                  ))}
-                </datalist>
-                <button
-                  type="button"
-                  className="pv-btn ghost"
-                  onClick={probeModels}
-                  disabled={probing}
-                  title="用当前填的端点与 Key 拉一次模型列表（凭据不保存）"
-                >
-                  {probing ? '拉取中…' : '获取模型'}
-                </button>
-              </div>
+              <ModelPicker
+                value={model}
+                models={models}
+                baseUrl={baseUrl}
+                apiKey={apiKey}
+                providerName="临时"
+                probe={probeModels}
+                onChange={(m, ms) => {
+                  setModel(m)
+                  setModels(ms)
+                }}
+              />
             </label>
             <button className="pv-btn primary" onClick={connect} disabled={busy === 'connect'}>
               {busy === 'connect' ? '连接中…' : '连接'}
             </button>
           </div>
+          {savedProviders.length > 0 && (
+            <div className="pv-saved">
+              <div className="pv-saved-title">
+                或者直接用已保存的供应商（密钥从本机加密存储读取，不需要在这里填）
+              </div>
+              <div className="pv-saved-list">
+                {savedProviders.map((p) => (
+                  <div key={p.id} className="pv-saved-group">
+                    <div className="pv-saved-name">
+                      <span className="mpk-item-vendor">{p.name}</span>
+                      <code>{p.baseUrl}</code>
+                    </div>
+                    <div className="pv-saved-models">
+                      {(p.models || (p.model ? [p.model] : [])).map((m) => {
+                        const key = `api:${p.id}/${m}`
+                        return (
+                          <button
+                            key={m}
+                            type="button"
+                            className={`pv-saved-model ${usingSaved === key ? 'on' : ''}`}
+                            onClick={() => {
+                              setUsingSaved(key)
+                              setStatus(null)
+                              setNote(`已选择 ${p.name} · ${m}`)
+                              setTimeout(() => setNote(''), 3000)
+                            }}
+                          >
+                            <b>{p.name}</b>
+                            <span>{m}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {note && <div className="pv-note">{note}</div>}
         </section>
       )}

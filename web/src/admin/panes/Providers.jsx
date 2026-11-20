@@ -24,6 +24,7 @@ import {
   Spinner,
   StatusDot,
 } from '../../ui'
+import ModelPicker from '../../components/ModelPicker'
 
 const ROLES = [
   { key: 'smart', label: '主力模型', hint: '日常对话与工具调用' },
@@ -49,8 +50,6 @@ const uid = () => `p_${Math.random().toString(36).slice(2, 9)}`
 export default function Providers({ settings, set, online }) {
   const [editing, setEditing] = useState(null)
   const [showKey, setShowKey] = useState(false)
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState(null)
   // 必须在 allModels 的 useMemo 之前声明：依赖数组在渲染时就求值，晚声明会 TDZ 崩页
 
   const providers = settings.providers || []
@@ -68,13 +67,11 @@ export default function Providers({ settings, set, online }) {
 
   const startAdd = () => {
     setEditing({ ...EMPTY, id: uid() })
-    setTestResult(null)
     setShowKey(false)
   }
 
   const startEdit = (p) => {
     setEditing({ ...EMPTY, ...p })
-    setTestResult(null)
     setShowKey(false)
   }
 
@@ -94,25 +91,17 @@ export default function Providers({ settings, set, online }) {
     if (editing?.id === id) setEditing(null)
   }
 
-  const test = async () => {
-    if (!editing?.baseUrl) return
-    setTesting(true)
-    setTestResult(null)
+  // 自动抓取：ModelPicker 填完端点/Key 后自己调，不需要用户点「测试连接」
+  const probeModels = async (payload) => {
     try {
       const r = await fetch('/api/providers/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ baseUrl: editing.baseUrl, apiKey: editing.apiKey }),
+        body: JSON.stringify(payload),
       })
-      const d = await r.json()
-      setTestResult(d?.ok ? { ok: true, models: d.models || [] } : { ok: false, error: d?.error || '连接失败' })
-      if (d?.ok && d.models?.length) {
-        setEditing((e) => ({ ...e, models: d.models, model: e.model || d.models[0] }))
-      }
-    } catch {
-      setTestResult({ ok: false, error: '预览模式：后端未启动，无法真正验证。' })
-    } finally {
-      setTesting(false)
+      return r.ok ? r.json() : { ok: false, error: `HTTP ${r.status}` }
+    } catch (e) {
+      return { ok: false, error: `连接失败（${e.name || 'Error'}）` }
     }
   }
 
@@ -221,19 +210,16 @@ export default function Providers({ settings, set, online }) {
             </Field>
 
             <div className="mt-3 grid grid-cols-2 gap-3">
-              <Field label="默认模型" hint="测试连接后可下拉选择">
-                <Select
+              <Field label="默认模型" hint="填好端点与密钥后自动识别，也可手动输入">
+                <ModelPicker
                   value={editing.model}
-                  onChange={(e) => setEditing({ ...editing, model: e.target.value })}
-                  className="w-full"
-                >
-                  <option value="">未选择</option>
-                  {(editing.models || []).map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </Select>
+                  models={editing.models || []}
+                  baseUrl={editing.baseUrl}
+                  apiKey={editing.apiKey}
+                  providerName={editing.name || 'API'}
+                  probe={probeModels}
+                  onChange={(m, ms) => setEditing((e) => ({ ...e, model: m, models: ms }))}
+                />
               </Field>
               <Field label="超时（秒）">
                 <Input
@@ -245,20 +231,9 @@ export default function Providers({ settings, set, online }) {
             </div>
 
             <div className="mt-4 flex items-center gap-2 border-t border-line pt-3">
-              <Button size="sm" onClick={test} disabled={testing || !editing.baseUrl}>
-                {testing ? <Spinner size={12} /> : <Zap size={13} />} 测试连接
-              </Button>
-              {testResult && (
-                <span
-                  className="flex items-center gap-1 text-[12px]"
-                  style={{ color: testResult.ok ? 'var(--success)' : 'var(--danger)' }}
-                >
-                  {testResult.ok ? <Check size={12} /> : null}
-                  {testResult.ok
-                    ? `连通，${testResult.models.length} 个模型可用`
-                    : testResult.error}
-                </span>
-              )}
+              <span className="text-[11.5px] text-faint">
+                模型列表在填好端点与密钥后自动识别；识别不到也能手动填，保存时会自动再试一次。
+              </span>
               <div className="ml-auto flex gap-2">
                 <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
                   取消

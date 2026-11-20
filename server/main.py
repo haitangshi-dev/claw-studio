@@ -367,7 +367,10 @@ app.add_middleware(
 # ---------------- 设置 / API 供应商（新设置页的唯一真源） ----------------
 import settings_api as _settings_api  # noqa: E402
 
-_settings_api.configure(DATA_ROOT, CONFIG_PATH, CFG)
+_settings_api.configure(
+    DATA_ROOT, CONFIG_PATH, CFG,
+    (BUNDLE / "data" / "settings.json") if EPHEMERAL else None,
+)
 app.include_router(_settings_api.router)
 
 import approval as _approval  # noqa: E402
@@ -1218,6 +1221,23 @@ async def provider_chat_shim(payload: dict, pid: str = "", model: str = ""):
     if resp.status_code >= 400:
         raw = await resp.aread()
         await resp.aclose()
+        # 模型名不匹配（上游 404 / "model not found"）时给一句人话，
+        # 不要让用户看着一段上游 JSON 猜哪里错了。
+        try:
+            _err = json.loads(raw) if raw else {}
+            _msg = str((_err.get("error") or {}).get("message") or "")
+        except Exception:
+            _msg = raw.decode("utf-8", "ignore")[:200] if isinstance(raw, bytes) else str(raw)[:200]
+        _low = _msg.lower()
+        if resp.status_code == 404 or "model" in _low or "not found" in _low:
+            return JSONResponse(
+                {"error": {
+                    "message": f"模型「{model or '未指定'}」在供应商「{pid}」不可用：{_msg[:120]}。"
+                               "请检查模型名拼写，或在设置页重新抓取模型列表；也支持手动填写自定义名称。",
+                    "type": "invalid_request_error",
+                }},
+                status_code=400,
+            )
         return Response(content=raw, status_code=resp.status_code,
                         media_type=resp.headers.get("content-type", "application/json"))
     return StreamingResponse(body, media_type="text/event-stream")

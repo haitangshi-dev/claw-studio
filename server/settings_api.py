@@ -65,13 +65,19 @@ _PERM_TO_LEGACY = {"readonly": "readonly", "ask": "standard", "standard": "stand
 
 
 # ---------------- 基础工具 ----------------
-def configure(data_root: Path, config_path: Path, cfg: dict) -> None:
-    """由 main.py 在启动时注入运行时路径与配置对象。"""
+def configure(data_root: Path, config_path: Path, cfg: dict,
+              settings_path: Path | None = None) -> None:
+    """由 main.py 在启动时注入运行时路径与配置对象。
+
+    settings_path 可覆盖默认位置：临时预览模式把会话/记忆/日志放进临时目录，
+    但「供应商配置」是用户主动保存的持久设置，必须留在项目 data/ 下，
+    否则每次重启预览都找不到自己刚加的供应商。
+    """
     global DATA_ROOT, CONFIG_PATH, CFG, SETTINGS_PATH
     DATA_ROOT = Path(data_root)
     CONFIG_PATH = Path(config_path)
     CFG = cfg
-    SETTINGS_PATH = DATA_ROOT / "data" / "settings.json"
+    SETTINGS_PATH = Path(settings_path) if settings_path else (DATA_ROOT / "data" / "settings.json")
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
@@ -266,11 +272,30 @@ def list_providers():
 
 @router.post("/api/providers")
 async def upsert_provider(payload: dict):
-    """新增或按 id 覆盖一个供应商；apiKey 留空表示沿用已存的密文。"""
+    """新增或按 id 覆盖一个供应商；apiKey 留空表示沿用已存的密文。
+
+    没给 models 时自动拉一次 /models——不然用户填完端点直接保存，
+    得到一个没有模型的供应商，界面上选择框空、对话也用不了。
+    """
     cur = load_settings()
     items = list(cur.get("providers") or [])
     cur["providers"] = _merge_incoming_providers(items, [payload or {}])
     saved = save_settings(cur)
+
+    pid = str((payload or {}).get("id") or "")
+    merged = next((p for p in (saved.get("providers") or []) if p.get("id") == pid), None)
+    if merged and not (merged.get("models") or []):
+        key = str((payload or {}).get("apiKey") or "").strip() or unprotect(merged.get("_apiKey") or "")
+        models, err = await fetch_provider_models(str(merged.get("baseUrl") or ""), key)
+        if models:
+            cur = load_settings()
+            for p in (cur.get("providers") or []):
+                if p.get("id") == pid:
+                    p["models"] = models
+                    if not p.get("model"):
+                        p["model"] = models[0]
+            saved = save_settings(cur)
+
     return {"ok": True, "providers": [_public_provider(p) for p in (saved.get("providers") or [])]}
 
 
@@ -293,6 +318,38 @@ def delete_provider(pid: str):
         CFG["default_model"] = ""
     saved = save_settings(cur)
     return {"ok": True, "providers": [_public_provider(p) for p in (saved.get("providers") or [])]}
+
+
+async def fetch_provider_models(base: str, key: str) -> tuple[list[str], str]:
+    """拉一次 /models，返回 (模型名列表, 错误)。不落库。"""
+    import httpx
+    import provider_proxy as _pp
+
+    base = str(base or "").strip().rstrip("/")
+    if not base:
+        return [], "缺少 Base URL"
+    if not key:
+        return [], "缺少 API Key"
+    try:
+        _chat, url = _pp.endpoints(base)
+    except ValueError:
+        url = f"{base}/models"
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as cli:
+            r = await cli.get(url, headers={"Authorization": f"Bearer {key}"})
+        if r.status_code == 401:
+            return [], "鉴权失败（401）：API Key 不对或没有权限"
+        if r.status_code >= 400:
+            return [], f"HTTP {r.status_code}：{r.text[:120]}"
+        data = r.json() if r.text else {}
+        items = data.get("data") if isinstance(data, dict) else None
+        models = [str(m.get("id")) for m in (items or [])
+                  if isinstance(m, dict) and m.get("id")]
+        return models[:200], ""
+    except httpx.HTTPError as e:
+        return [], f"连接失败：{type(e).__name__}"[:160]
+    except Exception as e:
+        return [], f"{type(e).__name__}: {e}"[:160]
 
 
 @router.post("/api/providers/test")

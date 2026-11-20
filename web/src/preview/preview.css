@@ -241,3 +241,37 @@
   font-size: 10.5px;
   color: var(--success);
 }
+
+/* 已保存供应商快捷选择 */
+.pv-saved {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+}
+.pv-saved-title { font-size: 11.5px; color: var(--text-faint); margin-bottom: 8px; }
+.pv-saved-list { display: flex; flex-direction: column; gap: 8px; }
+.pv-saved-group {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+.pv-saved-name { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
+.pv-saved-name code { font-size: 10.5px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; }
+.pv-saved-models { display: flex; flex-wrap: wrap; gap: 6px; }
+.pv-saved-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--text);
+}
+.pv-saved-model:hover { border-color: var(--primary); }
+.pv-saved-model.on { border-color: var(--primary); background: var(--primary-soft); }
+.pv-saved-model b { font-size: 10px; color: var(--primary); }
+.pv-saved-model span { font-family: var(--mono, monospace); }
