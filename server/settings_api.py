@@ -201,6 +201,7 @@ def _public_provider(p: dict, with_key: bool = False) -> dict:
         "timeout": int(p.get("timeout") or 120),
         "proxy": p.get("proxy", ""),
         "vision": bool(p.get("vision")),
+        "model_meta": p.get("model_meta") or {},
         "apiKeySet": bool(key),
         "apiKeyMask": mask(key),
         "createdAt": p.get("createdAt", 0),
@@ -234,6 +235,7 @@ def _merge_incoming_providers(current: list[dict], incoming: list[dict]) -> list
             "timeout": int(p.get("timeout") or 120),
             "proxy": str(p.get("proxy") or "").strip(),
             "vision": bool(p.get("vision")),
+            "model_meta": dict(p.get("model_meta") or {}),
             "_apiKey": enc,
             "createdAt": prev.get("createdAt") or int(time.time() * 1000),
         })
@@ -288,14 +290,18 @@ async def upsert_provider(payload: dict):
     merged = next((p for p in (saved.get("providers") or []) if p.get("id") == pid), None)
     if merged and not (merged.get("models") or []):
         key = str((payload or {}).get("apiKey") or "").strip() or unprotect(merged.get("_apiKey") or "")
-        models, err = await fetch_provider_models(str(merged.get("baseUrl") or ""), key)
-        if models:
+        metas, err = await fetch_provider_models_full(str(merged.get("baseUrl") or ""), key)
+        if metas:
             cur = load_settings()
             for p in (cur.get("providers") or []):
                 if p.get("id") == pid:
-                    p["models"] = models
+                    p["models"] = [m["id"] for m in metas]
+                    p["model_meta"] = {m["id"]: m for m in metas}
+                    # deepseek 这类端点直接给出 input_modalities，能自动判断多模态
+                    if any(m.get("vision") for m in metas):
+                        p["vision"] = True
                     if not p.get("model"):
-                        p["model"] = models[0]
+                        p["model"] = metas[0]["id"]
             saved = save_settings(cur)
 
     return {"ok": True, "providers": [_public_provider(p) for p in (saved.get("providers") or [])]}
@@ -320,6 +326,27 @@ def delete_provider(pid: str):
         CFG["default_model"] = ""
     saved = save_settings(cur)
     return {"ok": True, "providers": [_public_provider(p) for p in (saved.get("providers") or [])]}
+
+
+def _model_meta(m: dict) -> dict:
+    """从 OpenAI /models 条目里提取可用于自动检测的元数据。"""
+    out = {"id": str(m.get("id") or "")}
+    for src, dst in (("name", "name"), ("context_window", "ctx"),
+                     ("max_output_tokens", "max_out"), ("owned_by", "owned_by")):
+        v = m.get(src)
+        if v is not None:
+            try:
+                out[dst] = int(v) if dst in ("ctx", "max_out") else str(v)
+            except (TypeError, ValueError):
+                pass
+    mod = m.get("input_modalities") or []
+    if isinstance(mod, list):
+        out["vision"] = "image" in [str(x).lower() for x in mod]
+    eff = (m.get("effort") or {}) if isinstance(m.get("effort"), dict) else {}
+    lv = eff.get("supported_levels") or []
+    if isinstance(lv, list) and lv:
+        out["effort_levels"] = [str(x) for x in lv]
+    return out
 
 
 async def fetch_provider_models(base: str, key: str) -> tuple[list[str], str]:
@@ -352,6 +379,31 @@ async def fetch_provider_models(base: str, key: str) -> tuple[list[str], str]:
         return [], f"连接失败：{type(e).__name__}"[:160]
     except Exception as e:
         return [], f"{type(e).__name__}: {e}"[:160]
+
+
+async def fetch_provider_models_full(base: str, key: str) -> tuple[list[dict], str]:
+    """和 fetch_provider_models 一样拉 /models，但保留完整元数据（自动检测用）。"""
+    import httpx
+    import provider_proxy as _pp
+
+    base = str(base or "").strip().rstrip("/")
+    if not base or not key:
+        return [], "缺少 Base URL 或 Key"
+    try:
+        _chat, url = _pp.endpoints(base)
+    except ValueError:
+        url = f"{base}/models"
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as cli:
+            r = await cli.get(url, headers={"Authorization": f"Bearer {key}"})
+        if r.status_code >= 400:
+            return [], f"HTTP {r.status_code}"
+        data = r.json() if r.text else {}
+        items = data.get("data") if isinstance(data, dict) else None
+        out = [_model_meta(m) for m in (items or []) if isinstance(m, dict) and m.get("id")]
+        return out[:200], ""
+    except Exception as e:
+        return [], f"{type(e).__name__}"[:160]
 
 
 @router.post("/api/providers/test")
@@ -387,7 +439,9 @@ async def test_provider(payload: dict):
             return {"ok": False, "error": f"HTTP {r.status_code}：{r.text[:160]}"}
         data = r.json()
         items = data.get("data") if isinstance(data, dict) else None
-        models = [str(m.get("id")) for m in (items or []) if isinstance(m, dict) and m.get("id")]
-        return {"ok": True, "models": models[:200], "count": len(models)}
+        metas = [_model_meta(m) for m in (items or []) if isinstance(m, dict) and m.get("id")]
+        return {"ok": True, "models": [m["id"] for m in metas[:200]],
+                "model_meta": {m["id"]: m for m in metas[:200]},
+                "count": len(metas)}
     except httpx.HTTPError as e:
         return {"ok": False, "error": f"连接失败：{type(e).__name__}: {e}"[:200]}

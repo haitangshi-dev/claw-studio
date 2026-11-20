@@ -714,13 +714,18 @@ def models():
                 continue
             for name in names:
                 key = PP.key_for(pid, name)
+                _m = (pv.get("model_meta") or {}).get(name) or {}
+                # 自动检测：优先用 /models 返回里的 context_window（deepseek-v4 = 1M）
+                _ctx = int(_m.get("ctx") or 200000)
                 out.append(
                     {
                         "key": key,
-                        "name": f"{pv.get('name') or pid} · {name}",
+                        "name": f"{pv.get('name') or pid} · {_m.get('name') or name}",
                         "arch": "",
-                        "ctx_train": 128000,
-                        "ctx": 128000,
+                        "ctx_train": _ctx,
+                        "ctx": _ctx,
+                        "ctx_max_out": int(_m.get("max_out") or 0) or None,
+                        "name_full": _m.get("name") or "",
                         "size_label": "",
                         "source": "provider",
                         "size_mb": None,
@@ -729,7 +734,8 @@ def models():
                         "cloud": True,
                         "provider": "api",
                         "tools": True,    # OpenAI 兼容端点支持 function calling，走本地工具循环
-                        "images": False,
+                        "images": bool(pv.get("vision") or _m.get("vision")),
+                        "effort_levels": _m.get("effort_levels") or [],
                         "credits": "",
                         "free": False,
                     }
@@ -1433,18 +1439,35 @@ def _load_view(key: str, merged: dict) -> dict:
     # 自动检测 ctx：GGUF 元数据里的训练上下文长度（模型能力上限）。
     # 前端「自动」档就是用它；读不到时返回 0，让前端回退到默认值。
     auto_ctx = 0
-    _reg = REGISTRY.get(key) or {}
-    try:
-        auto_ctx = int((_reg.get("meta") or {}).get("ctx_train") or 0)
-    except (TypeError, ValueError):
-        auto_ctx = 0
+    auto_src = ""
+    if str(key).startswith("api:"):
+        # 云端：从供应商保存的 /models 元数据读 context_window（如 deepseek-v4 = 1M）
+        try:
+            import provider_proxy as _pp
+
+            _pid, _model = _pp.parse_key(str(key)) or ("", "")
+            for _pv in (_settings_api.load_settings().get("providers") or []):
+                if str(_pv.get("id")) == _pid:
+                    _m = (_pv.get("model_meta") or {}).get(_model) or {}
+                    auto_ctx = int(_m.get("ctx") or 0)
+                    break
+        except Exception:
+            auto_ctx = 0
+        auto_src = "模型目录元数据" if auto_ctx else ""
+    else:
+        _reg = REGISTRY.get(key) or {}
+        try:
+            auto_ctx = int((_reg.get("meta") or {}).get("ctx_train") or 0)
+        except (TypeError, ValueError):
+            auto_ctx = 0
+        auto_src = "GGUF 元数据" if auto_ctx else ""
     return {
         "model": key,
         "params": {k: merged.get(k, defaults.get(k)) for k in _LOAD_KEYS},
         "defaults": {k: defaults.get(k) for k in _LOAD_KEYS},
         "overridden": [k for k in _LOAD_KEYS if k in prof],
         "auto_ctx": auto_ctx,
-        "auto_source": "GGUF 元数据" if auto_ctx else "",
+        "auto_source": auto_src,
     }
 
 

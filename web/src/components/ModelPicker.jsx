@@ -26,6 +26,7 @@ export default function ModelPicker({
   const [list, setList] = useState(models || [])
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState(null)
+  const [meta, setMeta] = useState({})
   const [open, setOpen] = useState(false)
   const [idx, setIdx] = useState(-1)
   const rootRef = useRef(null)
@@ -53,10 +54,11 @@ export default function ModelPicker({
       if (r && r.ok) {
         const ms = r.models || []
         setList(ms)
+        if (r.model_meta) setMeta(r.model_meta)
         setStatus({ ok: true, text: ms.length ? `识别到 ${ms.length} 个模型` : '端点未返回模型，可手动输入' })
         if (!text.trim() && ms.length) {
           setText(ms[0])
-          onChange && onChange(ms[0], ms)
+          onChange && onChange(ms[0], ms, r.model_meta || {})
         }
       } else {
         setStatus({ ok: false, text: (r && r.error) || '无法获取模型列表，可手动输入' })
@@ -81,7 +83,7 @@ export default function ModelPicker({
     setText(m)
     setOpen(false)
     setIdx(-1)
-    onChange && onChange(m, list)
+    onChange && onChange(m, list, meta)
   }
 
   const onKey = (e) => {

@@ -1001,13 +1001,12 @@ export function ParamsPanel({ modelKey, params, onChange, onResetAll, onClose, o
           <div className="param-note">
             {isCloud
               ? (cloudMeta
-                  ? `云端模型：上下文窗口 ${Math.round((cloudMeta.ctx_train || 0) / 1000)}K（上游真实输入上限，压缩按它触发）`
-                    + (cloudMeta.ctx_max_out ? ` · 单轮输出上限 ${Math.round(cloudMeta.ctx_max_out / 1000)}K` : '')
-                    + '；加载参数由服务端管理，此处不适用。'
-                  : '云端模型：上下文窗口跟随上游配置（目录未拉到，按 200K 保守估算）。')
+                  ? `云端模型：自动检测到上下文 ${fmtCtx(cloudMeta.ctx_train)}（来自模型目录 /models），`
+                    + `单轮输出上限 ${fmtCtx(cloudMeta.ctx_max_out || 0)}。可自定义覆盖；其余加载参数由服务端管理。`
+                  : '云端模型：未能自动检测上下文（模型目录未返回），可手动指定。')
               : '模型加载参数：修改后自动重启该模型生效（约 7 秒）；模型未加载时仅保存，下次启动时应用。'}
           </div>
-          {!isCloud && LOAD_DEFS.map((d) => {
+          {(isCloud ? LOAD_DEFS.filter((d) => d.key === 'ctx') : LOAD_DEFS).map((d) => {
             const cur = loadCur(d.key)
             const overridden =
               load && (d.key === 'kv' ? load.overridden.includes('kv_k') || load.overridden.includes('kv_v') : load.overridden.includes(d.key))
@@ -1025,7 +1024,7 @@ export function ParamsPanel({ modelKey, params, onChange, onResetAll, onClose, o
                       onClick={() => { if (overridden) applyLoad(d.key, 'auto') }}
                       title="用模型 GGUF 元数据里的上下文长度"
                     >
-                      自动检测{load?.auto_ctx ? ` ${Math.round(load.auto_ctx / 1024)}K` : ''}
+                      自动检测{(isCloud ? cloudMeta?.ctx_train : load?.auto_ctx) ? ` ${fmtCtx(isCloud ? cloudMeta?.ctx_train : load?.auto_ctx)}` : ''}
                     </button>
                   )}
                   {d.choices.map(([v, lab]) => (
@@ -1048,7 +1047,7 @@ export function ParamsPanel({ modelKey, params, onChange, onResetAll, onClose, o
                       min={1024}
                       max={131072}
                       step={1024}
-                      placeholder={load?.auto_ctx ? String(load.auto_ctx) : '自定义 token 数'}
+                      placeholder={(isCloud ? cloudMeta?.ctx_train : load?.auto_ctx) ? String(isCloud ? cloudMeta?.ctx_train : load?.auto_ctx) : '自定义 token 数'}
                       defaultValue={overridden ? cur : ''}
                       disabled={loadBusy || !load}
                       onKeyDown={(e) => {

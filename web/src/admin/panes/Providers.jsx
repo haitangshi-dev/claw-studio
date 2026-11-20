@@ -219,7 +219,15 @@ export default function Providers({ settings, set, online }) {
                   apiKey={editing.apiKey}
                   providerName={editing.name || 'API'}
                   probe={probeModels}
-                  onChange={(m, ms) => setEditing((e) => ({ ...e, model: m, models: ms }))}
+                  onChange={(m, ms, mm) =>
+                    setEditing((e) => ({
+                      ...e,
+                      model: m,
+                      models: ms,
+                      ...(mm && Object.keys(mm).length ? { model_meta: mm } : {}),
+                      ...(mm && Object.values(mm).some((x) => x.vision) ? { vision: true } : {}),
+                    }))
+                  }
                 />
               </Field>
               <Field label="超时（秒）">
