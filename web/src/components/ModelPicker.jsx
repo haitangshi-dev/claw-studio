@@ -1,14 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, Loader2, RefreshCw, Sparkles, TriangleAlert } from 'lucide-react'
+import { Check, ChevronDown, Loader2, Pencil, RefreshCw, Sparkles, TriangleAlert } from 'lucide-react'
+import './ModelPicker.css'
 
 /**
- * 模型选择器：自动抓取 + 可手填 + 好看。
+ * 模型选择器：自动抓取 + 手填 + 好看。
  *
- * 设计要点：
- * - 填完 Base URL / Key 后自动抓取模型（防抖），不需要先点「测试连接」；
- * - 候选项显示「供应商名 · 模型名」，不是干巴巴的模型字符串；
- * - 支持手输任意模型名（有些端点不提供 /models，或要用最新模型）；
- * - 抓取失败不崩溃，内联说明原因，并且照样允许手填。
+ * 视觉层次：
+ *   1. 主控件：供应商徽章 + 模型名，大而清晰
+ *   2. 状态条：识别到几个模型 / 抓取失败，一眼可见
+ *   3. 候选面板：每项「供应商徽章 · 模型名」，选中项高亮打勾
+ *   4. 手填提示：自定义模型名原样发送，不阻止
  */
 export default function ModelPicker({
   value = '',
@@ -17,29 +18,22 @@ export default function ModelPicker({
   baseUrl = '',
   apiKey = '',
   providerName = 'API',
-  probe,                // async (payload) => { ok, models?, error? }
-  auto = true,          // 填完自动抓
-  placeholder = '选择或输入模型名…',
-  compact = false,
+  probe,
+  auto = true,
+  placeholder = '输入或选择模型名…',
 }) {
   const [text, setText] = useState(value || '')
   const [list, setList] = useState(models || [])
   const [loading, setLoading] = useState(false)
-  const [status, setStatus] = useState(null)   // {ok, text}
+  const [status, setStatus] = useState(null)
   const [open, setOpen] = useState(false)
   const [idx, setIdx] = useState(-1)
   const rootRef = useRef(null)
   const seq = useRef(0)
 
-  useEffect(() => {
-    setText(value || '')
-  }, [value])
+  useEffect(() => setText(value || ''), [value])
+  useEffect(() => { if (models && models.length) setList(models) }, [models])
 
-  useEffect(() => {
-    if (models && models.length) setList(models)
-  }, [models])
-
-  // 外部值变化时同步
   useEffect(() => {
     const onDoc = (e) => {
       if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false)
@@ -48,29 +42,28 @@ export default function ModelPicker({
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
 
-  const doProbe = async (silent = false) => {
+  const doProbe = async () => {
     if (!baseUrl.trim() || !apiKey.trim() || !probe) return
     const my = ++seq.current
     setLoading(true)
-    if (!silent) setStatus(null)
+    setStatus(null)
     try {
       const r = await probe({ baseUrl, apiKey })
-      if (my !== seq.current) return           // 被更新的请求取代
+      if (my !== seq.current) return
       if (r && r.ok) {
         const ms = r.models || []
         setList(ms)
-        setStatus({ ok: true, text: ms.length ? `已自动识别 ${ms.length} 个模型` : '端点没有返回模型，可手动输入' })
-        // 用户还没选过模型时，自动用第一个——这样保存后立即可用
+        setStatus({ ok: true, text: ms.length ? `识别到 ${ms.length} 个模型` : '端点未返回模型，可手动输入' })
         if (!text.trim() && ms.length) {
           setText(ms[0])
           onChange && onChange(ms[0], ms)
         }
       } else {
-        setStatus({ ok: false, text: (r && r.error) || '无法获取模型列表，可手动输入模型名' })
+        setStatus({ ok: false, text: (r && r.error) || '无法获取模型列表，可手动输入' })
       }
     } catch (e) {
       if (my !== seq.current) return
-      setStatus({ ok: false, text: `连接失败（${e.name || 'Error'}），可手动输入模型名` })
+      setStatus({ ok: false, text: `连接失败（${e.name || 'Error'}），可手动输入` })
     } finally {
       if (my === seq.current) setLoading(false)
     }
@@ -80,7 +73,7 @@ export default function ModelPicker({
   useEffect(() => {
     if (!auto || !probe) return undefined
     if (!baseUrl.trim() || !apiKey.trim() || apiKey.includes('•')) return undefined
-    const t = setTimeout(() => doProbe(true), 700)
+    const t = setTimeout(() => doProbe(), 700)
     return () => clearTimeout(t)
   }, [baseUrl, apiKey])
 
@@ -111,10 +104,10 @@ export default function ModelPicker({
   const isCustom = text && !list.includes(text)
 
   return (
-    <div className={`mpk ${compact ? 'compact' : ''}`} ref={rootRef}>
-      <div className={`mpk-box ${open ? 'open' : ''}`}>
+    <div className="mpk" ref={rootRef}>
+      <div className={`mpk-control ${open ? 'open' : ''}`}>
         <span className="mpk-vendor" title={`供应商：${providerName}`}>
-          <Sparkles size={11} />
+          <Sparkles size={12} />
           <span>{providerName}</span>
         </span>
         <input
@@ -129,56 +122,67 @@ export default function ModelPicker({
           placeholder={placeholder}
           spellCheck={false}
         />
-        {loading && <Loader2 size={13} className="mpk-spin" />}
-        {!loading && probe && (
+        {loading && <Loader2 size={14} className="mpk-spin" />}
+        {!loading && (
           <button
             type="button"
-            className="mpk-icon"
+            className="mpk-act"
             title="重新拉取模型列表"
-            onClick={(e) => {
-              e.stopPropagation()
-              doProbe()
-            }}
+            onClick={(e) => { e.stopPropagation(); doProbe() }}
           >
-            <RefreshCw size={12} />
+            <RefreshCw size={13} />
           </button>
         )}
-        <button type="button" className="mpk-icon" onClick={() => setOpen((v) => !v)}>
-          <ChevronDown size={12} />
+        <button
+          type="button"
+          className={`mpk-act mpk-toggle ${open ? 'on' : ''}`}
+          onClick={() => setOpen((v) => !v)}
+          aria-label="展开模型列表"
+        >
+          <ChevronDown size={14} />
         </button>
       </div>
 
-      {status && (
-        <div className={`mpk-status ${status.ok ? 'ok' : 'err'}`}>
-          {status.ok ? <Check size={11} /> : <TriangleAlert size={11} />}
-          <span>{status.text}</span>
-        </div>
-      )}
+      <div className="mpk-meta">
+        {status ? (
+          <span className={`mpk-chip ${status.ok ? 'ok' : 'err'}`}>
+            {status.ok ? <Check size={11} /> : <TriangleAlert size={11} />}
+            {status.text}
+          </span>
+        ) : (
+          <span className="mpk-chip mute">
+            {baseUrl && apiKey ? '正在识别模型…' : '填好端点与密钥后自动识别'}
+          </span>
+        )}
+        <span className="mpk-hint"><Pencil size={10} /> 可直接手填</span>
+      </div>
 
-      {open && shown.length > 0 && (
-        <div className="mpk-list">
+      {open && (shown.length > 0 || isCustom) && (
+        <div className="mpk-panel">
+          <div className="mpk-panel-head">
+            <span>可选模型</span>
+            <span className="mpk-count">{list.length}</span>
+            <button type="button" onClick={() => setOpen(false)}>收起</button>
+          </div>
           {shown.map((m, i) => (
             <button
               type="button"
               key={m}
-              className={`mpk-item ${i === idx ? 'on' : ''} ${m === text ? 'current' : ''}`}
+              className={`mpk-row ${i === idx ? 'on' : ''} ${m === text ? 'current' : ''}`}
               onMouseEnter={() => setIdx(i)}
-              onMouseDown={(e) => {
-                e.preventDefault()
-                commit(m)
-              }}
+              onMouseDown={(e) => { e.preventDefault(); commit(m) }}
             >
-              <span className="mpk-item-vendor">{providerName}</span>
-              <span className="mpk-item-model">{m}</span>
-              {m === text && <Check size={12} className="mpk-item-check" />}
+              <span className="mpk-row-vendor">{providerName}</span>
+              <span className="mpk-row-model">{m}</span>
+              {m === text && <span className="mpk-row-check"><Check size={12} /></span>}
             </button>
           ))}
-        </div>
-      )}
-
-      {open && isCustom && !shown.length && (
-        <div className="mpk-custom">
-          使用自定义模型名 <b>{text}</b>（该名称不在自动列表里，仍会照原样发给 API）
+          {isCustom && (
+            <div className="mpk-custom">
+              <Pencil size={11} />
+              <span>使用自定义模型名 <b>{text}</b>，将原样发给 API</span>
+            </div>
+          )}
         </div>
       )}
     </div>
