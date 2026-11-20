@@ -117,12 +117,12 @@ def send(payload: dict):
     if not to_user:
         return {"ok": False, "error": "还没绑定微信，先扫码登录"}
 
+    # 直接投递，不等会话窗口。
+    # 旧逻辑强制要 context_token，没有就拒绝——用户得先去微信发一条"开窗口"，
+    # 体验很差。现在有就用、没有就空着投给 relay：微信 -2 打回时 relay 会按
+    # 次数/时长归档，不会无限重试（见 bridge/relay.py drain_outbox）。
     done = sorted((root / "inbox" / "done").glob("*.json"), key=_ts_of)
-    ctx = ""
-    if done:
-        ctx = str(_read(done[-1]).get("context_token") or "")
-    if not ctx:
-        return {"ok": False, "error": "还没有可用的会话窗口：先在微信里给机器人发一条消息，再回这里发送"}
+    ctx = str(_read(done[-1]).get("context_token") or "") if done else ""
 
     out = root / "outbox"
     out.mkdir(parents=True, exist_ok=True)
@@ -132,6 +132,36 @@ def send(payload: dict):
                                "from_user_id": ""}, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(str(tmp), str(out / name))
     return {"ok": True, "id": name, "message": "已投递到发件队列"}
+
+
+@router.post("/api/wechat/logout")
+def logout():
+    """退出微信账号：停掉桥接并清除本机登录凭证（token/binding/auth）。
+
+    用于把项目交给别人之前清掉自己的账号，或换号重新扫码。
+    清掉后状态变成未登录，需要重新扫码绑定。
+    """
+    import wechat as wechat_mod
+
+    root = _bridge()
+    if root is None:
+        return {"ok": False, "error": "找不到微信桥接目录"}
+    # 先停进程，避免看门狗把 relay/worker 拉回来、或进程内存里还握着旧 token
+    try:
+        wechat_mod.stop(CFG, DATA_ROOT)
+    except Exception:
+        pass
+    removed = []
+    for rel in ("secure/token.json", "secure/binding.json", "state/auth.json",
+                "state/cursor.json", "qr/wechat-login.png", "qr/qr-content.txt"):
+        p = root / rel
+        try:
+            if p.exists():
+                p.unlink()
+                removed.append(rel)
+        except OSError:
+            pass
+    return {"ok": True, "removed": removed, "message": "已退出微信账号，凭证已清除"}
 
 
 @router.post("/api/wechat/login")

@@ -20,6 +20,7 @@ import {
   stopWechat,
   getWechatMessages,
   sendWechatMessage,
+  logoutWechat,
   wechatLogin,
 } from '../../api'
 
@@ -149,6 +150,22 @@ export function WeChatPane({ settings, set }) {
             <div className="flex items-center gap-2">
               <Button size="sm" variant="ghost" onClick={doLogin} disabled={busy === 'login'}>
                 扫码绑定
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={async () => {
+                  if (!window.confirm('确定退出微信账号？会清除本机登录凭证，需要重新扫码。')) return
+                  setBusy('logout')
+                  const d = await logoutWechat().catch(() => ({ ok: false, error: '请求失败' }))
+                  setBusy('')
+                  setNote(d.ok ? d.message : d.error || '退出失败')
+                  loadStatus()
+                }}
+                disabled={busy === 'logout'}
+              >
+                {busy === 'logout' ? <Spinner size={12} /> : null}
+                退出登录
               </Button>
               <Button size="sm" onClick={toggleRun} disabled={busy === 'run'}>
                 {busy === 'run' ? <Spinner size={12} /> : null}

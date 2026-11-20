@@ -431,6 +431,11 @@ export async function postPlan(body) {
 }
 
 // ---- 微信界面 ----
+export async function logoutWechat() {
+  const r = await fetch('/api/wechat/logout', { method: 'POST' })
+  return r.json()
+}
+
 export async function getWechatMessages(limit = 60) {
   try {
     const r = await fetch(`/api/wechat/messages?limit=${limit}`)
