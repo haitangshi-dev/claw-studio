@@ -1469,11 +1469,15 @@ def refresh_models():
 @app.post("/api/models/switch")
 async def switch_model(payload: dict):
     req_key = str(payload.get("key") or "")
-    if CFG.get("cloud_only") and not req_key.startswith("qoder:"):
-        return {"ok": False, "error": "本地模型已禁用：请选择 Qoder 云端模型"}
-    if req_key.startswith("qoder:"):
-        # 云端模型：无需本地加载，前端记下即可
-        return {"ok": True, "model": req_key, "cloud": True, "note": "云端模型，无需本地加载"}
+    # 通道型模型（qoder / api 供应商 / 临时连接）都不需要本地加载，前端记下即可。
+    # 之前只放行 qoder:，api: 落到 resolve_profile 直接报「未知模型」——
+    # 表现就是模型菜单里明明看得到、一点切换就失败。
+    is_channel = req_key.startswith(("qoder:", "api:"))
+    if CFG.get("cloud_only") and not is_channel:
+        return {"ok": False, "error": "本地模型已禁用：请选择云端模型"}
+    if is_channel:
+        return {"ok": True, "model": req_key, "cloud": True,
+                "note": "云端模型，无需本地加载"}
     try:
         key, path, params = resolve_profile(payload.get("key"))
     except KeyError as e:
@@ -1506,6 +1510,10 @@ def _load_view(key: str, merged: dict) -> dict:
 @app.get("/api/models/load_params")
 def get_load_params(model: str | None = None):
     """模型加载参数（defaults + 档案合并；model 省略时取当前粘性模型）。"""
+    # 通道型模型没有本地加载参数：把框架默认值原样回回去，
+    # 前端ParamsPanel 打开时才不会报「未知模型」。
+    if str(model or "").startswith(("api:", "qoder:")):
+        return {"ok": True, **_load_view(str(model), {})}
     try:
         key, _path, merged = resolve_for_chat(model)
     except KeyError as e:
@@ -1517,6 +1525,8 @@ def get_load_params(model: str | None = None):
 async def set_load_params(req: LoadParamsRequest):
     """保存模型加载参数（写入 models.json 档案）；若该模型正在加载 → 立即重启生效。"""
     key = req.model
+    if str(key or "").startswith(("api:", "qoder:")):
+        return {"ok": False, "error": "云端模型没有本地加载参数（采样用对话参数面板调）"}
     src = req.params or {}
     clean: dict = {}
     if "ctx" in src:
