@@ -2711,3 +2711,10 @@ body {
   50%      { opacity: .35; }
 }
 .unattended-chip.on .unattended-dot { animation: un-breathe 1.9s ease-in-out infinite; }
+
+/* 品牌头像：像素螃蟹用主题色，不再套橙棕圆底 */
+.avatar.brand-avatar {
+  background: var(--primary-soft) !important;
+  border: 1px solid color-mix(in srgb, var(--primary) 24%, transparent);
+}
+.avatar.brand-avatar svg rect { /* 像素标记自带主题色 */ }

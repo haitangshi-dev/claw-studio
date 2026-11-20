@@ -690,7 +690,8 @@ def models():
                 "arch": "", "ctx_train": 128000, "ctx": 128000,
                 "size_label": "", "source": "ephemeral", "size_mb": None,
                 "has_profile": False, "current": bool(default_key == f"api:{_eph0.EPHEMERAL_ID}/{_c['model']}"),
-                "cloud": True, "provider": "api", "tools": True, "images": False,
+                "cloud": True, "provider": "api", "tools": True,
+                "images": bool((PP.find_provider(pid) or {}).get("vision")),
                 "credits": "", "free": False,
             })
     except Exception:
@@ -2275,9 +2276,22 @@ async def chat(req: ChatRequest):
         async with httpx.AsyncClient(timeout=timeout) as client:
             # 图片输入：云端模型支持视觉 → 直传；否则交视觉专家（本地或云端）识别
             if req.images:
-                    vision_key = str(_experts().get("vision") or "")
+                    # 供应商通道且该供应商标记了多模态 → 图片按 OpenAI 标准 content 块直传，
+                    # 不再先交给本地视觉专家转成文字（那会把 deepseek-v4 的多模态能力废掉）。
+                    _pv = PP.parse_key(str(req.model or "")) if is_provider else None
+                    _vendor = PP.find_provider(_pv[0]) if _pv else None
+                    direct_vision = bool(is_provider and _vendor and _vendor.get("vision"))
+                    if direct_vision:
+                        for _m in messages:
+                            if _m.get("role") == "user":
+                                _m["content"] = _cloud_image_parts(req.images, str(_m.get("content") or ""))
+                                break
+                        yield sse({"type": "notice", "text": f"图片直传多模态模型 {_pv[1]}"})
+                    vision_key = "" if direct_vision else str(_experts().get("vision") or "")
                     desc = ""
-                    if not vision_key:
+                    if direct_vision:
+                        pass
+                    elif not vision_key:
                         yield sse({"type": "notice", "text": "未配置图片识别专家（可在模型参数里选择）"})
                     else:
                         try:

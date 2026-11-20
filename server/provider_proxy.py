@@ -91,6 +91,21 @@ def _clean(payload: dict, model: str) -> dict:
     if not body.get("tools"):
         body.pop("tools", None)
         body.pop("tool_choice", None)
+    else:
+        # OpenAI 兼容协议要求每个 tool 都有 type:"function"。
+        # 插件/MCP 注册的工具偶尔只给 function 字段，上游会回
+        # 「tools[34]: missing field `type`」422，整轮对话直接失败。
+        # 这里统一补齐，避免某个工具定义不规范就把请求打挂。
+        fixed = []
+        for t in body["tools"]:
+            if not isinstance(t, dict):
+                fixed.append(t)
+                continue
+            t = dict(t)
+            if not t.get("type"):
+                t["type"] = "function"
+            fixed.append(t)
+        body["tools"] = fixed
     return body
 
 

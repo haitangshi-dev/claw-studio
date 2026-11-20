@@ -43,6 +43,7 @@ const EMPTY = {
   models: [],
   timeout: 120,
   proxy: '',
+  vision: false,
 }
 
 const uid = () => `p_${Math.random().toString(36).slice(2, 9)}`
@@ -146,7 +147,7 @@ export default function Providers({ settings, set, online }) {
                     )}
                   </span>
                 }
-                hint={`${p.baseUrl}${p.model ? ` · ${p.model}` : ''}`}
+                hint={`${p.baseUrl}${p.model ? ` · ${p.model}` : ''}${p.vision ? ' · 多模态' : ''}`}
               >
                 <Button size="sm" variant="ghost" onClick={() => startEdit(p)}>
                   编辑
@@ -227,6 +228,16 @@ export default function Providers({ settings, set, online }) {
                   value={editing.timeout}
                   onChange={(e) => setEditing({ ...editing, timeout: Number(e.target.value) })}
                 />
+              </Field>
+              <Field label="多模态（图片直传）" hint="开启后图片会直接发给该供应商的模型，不再转文字">
+                <label className="flex h-[34px] cursor-pointer items-center gap-2 rounded-lg border border-line px-3 text-[12.5px]">
+                  <input
+                    type="checkbox"
+                    checked={!!editing.vision}
+                    onChange={(e) => setEditing({ ...editing, vision: e.target.checked })}
+                  />
+                  <span>这个供应商的模型能看图（如 DeepSeek-V4 / GPT-4o）</span>
+                </label>
               </Field>
             </div>
 

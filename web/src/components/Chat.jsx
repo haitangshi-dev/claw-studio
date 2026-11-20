@@ -132,6 +132,14 @@ export function CrabFace({ size = 18 }) {
 }
 
 // ---------- 消息 ----------
+// api:p_xxx/deepseek-v4-pro → deepseek-v4-pro；普通名字原样短化
+function shortModel(model) {
+  const s = String(model || '').trim()
+  if (!s) return ''
+  const tail = s.includes('/') ? s.split('/').pop() : s
+  return tail.includes(':') ? tail.split(':').pop() : tail
+}
+
 export function MessageView({ msg, streaming, isLast, onRegenerate, onEdit, onSpeak, speaking }) {
   const [copied, setCopied] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -215,8 +223,8 @@ export function MessageView({ msg, streaming, isLast, onRegenerate, onEdit, onSp
       : ''
     return (
       <div className="msg-assistant msg-team" style={{ '--team-color': roomColor }}>
-        <div className="avatar crab-avatar" style={{ background: s.color || '#D9713A' }}>
-          <CrabFace size={19} />
+        <div className="avatar crab-avatar" style={{ background: s.color || 'var(--primary)' }}>
+          <CrabMark size={22} />
         </div>
         <div className="body">
           <div className="team-head">
@@ -255,11 +263,13 @@ export function MessageView({ msg, streaming, isLast, onRegenerate, onEdit, onSp
 
   return (
     <div className="msg-assistant">
-      <div className="avatar crab-avatar" style={{ background: 'linear-gradient(135deg,#B85A24,#8E3C0C)' }}>
-        <CrabFace size={19} />
+      <div className="avatar crab-avatar brand-avatar">
+        <CrabMark size={22} />
       </div>
       <div className="body">
-        <div className="team-head"><span className="src-badge claw">助理</span><span className="team-name">Claw</span></div>
+        <div className="team-head">
+          <span className="src-badge claw">{shortModel(msg.model) || 'Claw'}</span>
+        </div>
         {tl ? (
           <>
             {tl.map((s, i) => (

@@ -200,6 +200,7 @@ def _public_provider(p: dict, with_key: bool = False) -> dict:
         "models": p.get("models") or [],
         "timeout": int(p.get("timeout") or 120),
         "proxy": p.get("proxy", ""),
+        "vision": bool(p.get("vision")),
         "apiKeySet": bool(key),
         "apiKeyMask": mask(key),
         "createdAt": p.get("createdAt", 0),
@@ -232,6 +233,7 @@ def _merge_incoming_providers(current: list[dict], incoming: list[dict]) -> list
             "models": list(p.get("models") or []),
             "timeout": int(p.get("timeout") or 120),
             "proxy": str(p.get("proxy") or "").strip(),
+            "vision": bool(p.get("vision")),
             "_apiKey": enc,
             "createdAt": prev.get("createdAt") or int(time.time() * 1000),
         })
